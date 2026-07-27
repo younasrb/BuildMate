@@ -1,0 +1,6 @@
+{
+  "name": "BuildMate AI",
+  "description": "Smart AI Development Assistant for Roman Urdu & English - Generate PDFs, Presentations, Code, Summarize Documents, and Analyze Data.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
