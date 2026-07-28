@@ -23,6 +23,18 @@ It supports both Roman Urdu and English, making it accessible to a wider audienc
 
 ---
 
+## Screenshots
+
+| Dashboard Home | AI Dashboard | PDF Report Studio |
+|---|---|---|
+| ![Dashboard Home](screenshots/dashboard-home.jpg) | ![AI Dashboard](screenshots/admin-dashboard.jpg) | ![PDF Report Studio](screenshots/pdf-report-studio.jpg) |
+
+| Presentation Studio |
+|---|
+| ![Presentation Studio](screenshots/presentation-studio.jpg) |
+
+---
+
 ## Problem Statement
 
 Many students and independent developers rely on multiple tools to complete a single task:
@@ -141,18 +153,6 @@ The same instruction set is applied consistently across all providers through th
 
 ---
 
-## Screenshots
-
-| Dashboard Home | Admin Dashboard |
-|---|---|
-| ![Dashboard Home](screenshots/dashboard-home.jpg) | ![Admin Dashboard](screenshots/admin-dashboard.jpg) |
-
-| Presentation Studio |
-|---|
-| ![Presentation Studio](screenshots/presentation-studio.jpg) |
-
----
-
 ## Local Development
 
 ### Prerequisites
@@ -174,66 +174,3 @@ cp .env.example .env
 
 # Start the development server
 npm run dev
-```
-
-Then open:
-
-```bash
-http://localhost:3000
-```
-
----
-
-## Deployment
-
-The project is ready to deploy on Vercel.
-
-### Steps
-1. Push the repository to GitHub.
-2. Import the repository into Vercel.
-3. Add the required environment variables in the Vercel dashboard.
-4. Deploy the project.
-
-The live app is available here:
-
-**https://buildmate-rosy.vercel.app/**
-
----
-
-## Project Structure
-
-```text
-buildmate-ai/
-├── src/                      # React frontend (Vite)
-│   ├── components/
-│   │   ├── modals/           # PDF, Presentation, Code Editor, Voice Call, Admin modals
-│   │   ├── ChatSection.tsx
-│   │   ├── TopHeader.tsx
-│   │   ├── LeftSidebar.tsx / RightSidebar.tsx
-│   │   └── HeroBanner.tsx
-│   ├── utils/                # pdfGenerator.ts, exporter.ts
-│   └── App.tsx
-├── server/
-│   ├── app.ts                # Express app and system prompt
-│   ├── routingEngine.ts      # Smart routing and failover logic
-│   └── adapters/             # Provider-specific adapters
-├── api/index.ts              # Vercel serverless entry point
-├── server.ts                 # Local development entry point
-└── .env.example              # Supported environment variables
-```
-
----
-
-## Security
-
-No API keys or secrets are committed to the repository. All credentials are provided through environment variables locally and in production.
-
----
-
-## Author
-
-**Muhammad Younas Mengal**  
-BUETK — Balochistan University of Engineering & Technology, Khuzdar  
-ACT AI Batch 2
-
-Built as a final project focused on creating a practical AI workspace for students and developers.
