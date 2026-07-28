@@ -10,6 +10,7 @@ interface PresentationModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialData?: PresentationData | null;
+  initialTopic?: string;
   onGeneratePresentation: (topic: string, slideCount: number) => Promise<PresentationData | void>;
 }
 
@@ -19,6 +20,7 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
   isOpen,
   onClose,
   initialData,
+  initialTopic,
   onGeneratePresentation,
 }) => {
   const [topic, setTopic] = useState('');
@@ -28,12 +30,20 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [pptTheme, setPptTheme] = useState<PPTTheme>('dark');
   const [isEditing, setIsEditing] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen && initialTopic && initialTopic.trim()) {
+      setTopic(initialTopic.trim());
+    }
+  }, [isOpen, initialTopic]);
 
   if (!isOpen) return null;
 
   const handleGenerate = async () => {
     if (!topic.trim()) return;
     setIsGenerating(true);
+    setErrorMsg(null);
     try {
       const result = await onGeneratePresentation(topic, slideCount);
       if (result) {
@@ -41,8 +51,9 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
         setActiveSlideIndex(0);
         confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setErrorMsg(e?.message || 'Presentation generate nahi ho saki. Dobara koshish karein.');
     } finally {
       setIsGenerating(false);
     }
@@ -173,6 +184,12 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
               <span>{isGenerating ? 'Building Slides...' : 'Build Slide Deck'}</span>
             </button>
           </div>
+
+          {errorMsg && (
+            <div className="mb-4 p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs">
+              ⚠️ {errorMsg}
+            </div>
+          )}
 
           {/* Interactive Slide Canvas Viewer or Engaging Loader */}
           {isGenerating ? (

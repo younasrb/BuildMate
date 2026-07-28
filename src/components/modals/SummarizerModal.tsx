@@ -21,20 +21,23 @@ export const SummarizerModal: React.FC<SummarizerModalProps> = ({
   const [filename, setFilename] = useState('My Document');
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summary, setSummary] = useState<SummaryData | null>(initialSummary || null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleSummarize = async () => {
     if (!docText.trim()) return;
     setIsSummarizing(true);
+    setErrorMsg(null);
     try {
       const res = await onSummarizeDocument(docText, filename);
       if (res) {
         setSummary(res);
         confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setErrorMsg(e?.message || 'Document summarize nahi ho saka. Dobara koshish karein.');
     } finally {
       setIsSummarizing(false);
     }
@@ -101,6 +104,12 @@ export const SummarizerModal: React.FC<SummarizerModalProps> = ({
               rows={5}
               className="w-full bg-slate-900 border border-indigo-900/60 rounded-lg p-3 text-slate-200 focus:border-indigo-500 focus:outline-none resize-none font-sans"
             />
+
+            {errorMsg && (
+              <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs">
+                ⚠️ {errorMsg}
+              </div>
+            )}
 
             <div className="flex justify-end">
               <button

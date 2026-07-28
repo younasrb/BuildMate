@@ -91,6 +91,18 @@ export interface PresentationData {
   slides: Slide[];
 }
 
+export interface ProjectFile {
+  path: string;
+  content: string;
+  language?: string;
+}
+
+export interface ProjectData {
+  projectName: string;
+  description?: string;
+  files: ProjectFile[];
+}
+
 export interface SummaryData {
   documentTitle: string;
   executiveSummary: string;

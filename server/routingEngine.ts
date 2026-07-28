@@ -324,28 +324,25 @@ export class IntelligentRoutingEngine {
     };
     this.apiLogs.unshift(errLog);
 
-    // If all candidates failed, generate intelligent fallback message
-    const friendlyFallbackReply = `Assalam-o-Alaikum! BuildMate AI Proxy engine ne aapki query process kar li hai:
-
-Aapki query: **"${req.message || 'General Query'}"**
-
-- **Status**: ✅ Active & Connected
-- **Engine**: BuildMate Multi-Provider Smart Router
-- **Language**: Roman Urdu & English Supported
-
-Agar aapko is hawale se koi mazeed sawal ya code chahiye toh aap yahan pooch sakte hain!`;
-
+    // If all candidates failed (or none were configured/eligible at all), return a real
+    // error instead of a fabricated "successful" reply — the caller needs to know no
+    // provider actually handled the request.
+    const noneConfigured = candidates.length === 0;
     return {
-      reply: friendlyFallbackReply,
+      reply: '',
       providerUsed: candidates[0]?.id || 'gemini',
-      modelUsed: 'gemini-2.5-flash',
+      modelUsed: 'none',
       category,
       strategyUsed: strategy,
       latencyMs: Date.now() - startTime,
-      tokensUsed: { input: 120, output: 250, total: 370 },
+      tokensUsed: { input: 0, output: 0, total: 0 },
       estimatedCostUsd: 0,
-      status: 'success',
-      isFallback: true,
+      fallbackChain: fallbackChain.length > 0 ? fallbackChain : undefined,
+      status: 'error',
+      errorMessage: noneConfigured
+        ? 'No AI provider is configured. Please add an API key in Settings.'
+        : lastError || 'All configured AI providers failed to respond.',
+      noProviderAvailable: true,
     };
   }
 

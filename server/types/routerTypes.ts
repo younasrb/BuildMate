@@ -86,6 +86,7 @@ export interface RouterResponse {
   isFallback?: boolean;
   status: 'success' | 'error';
   errorMessage?: string;
+  noProviderAvailable?: boolean;
 }
 
 export interface ApiLogEntry {

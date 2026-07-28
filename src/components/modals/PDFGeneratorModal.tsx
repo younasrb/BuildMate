@@ -10,6 +10,7 @@ interface PDFGeneratorModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialData?: PDFData | null;
+  initialTopic?: string;
   onGeneratePDF: (topic: string, instructions: string) => Promise<PDFData | void>;
 }
 
@@ -17,26 +18,36 @@ export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
   isOpen,
   onClose,
   initialData,
+  initialTopic,
   onGeneratePDF,
 }) => {
   const [topic, setTopic] = useState('');
   const [instructions, setInstructions] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [pdfData, setPdfData] = useState<PDFData | null>(initialData || null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen && initialTopic && initialTopic.trim()) {
+      setTopic(initialTopic.trim());
+    }
+  }, [isOpen, initialTopic]);
 
   if (!isOpen) return null;
 
   const handleGenerate = async () => {
     if (!topic.trim()) return;
     setIsGenerating(true);
+    setErrorMsg(null);
     try {
       const result = await onGeneratePDF(topic, instructions);
       if (result) {
         setPdfData(result);
         confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setErrorMsg(e?.message || 'PDF generate nahi ho saka. Dobara koshish karein.');
     } finally {
       setIsGenerating(false);
     }
@@ -104,6 +115,12 @@ export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
                 className="w-full bg-slate-900 border border-indigo-900/60 rounded-lg p-2.5 text-slate-200 focus:border-indigo-500 focus:outline-none"
               />
             </div>
+
+            {errorMsg && (
+              <div className="md:col-span-2 p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs">
+                ⚠️ {errorMsg}
+              </div>
+            )}
 
             <div className="md:col-span-2 flex justify-end">
               <button

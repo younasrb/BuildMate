@@ -21,6 +21,21 @@ export function createApp(): Express {
 
   app.use(express.json({ limit: '10mb' }));
 
+  // Simple admin-only guard for the analytics dashboard (view usage logs / reset them).
+  // This has nothing to do with AI usage limits — it only stops random visitors from
+  // viewing or wiping the operator's analytics data. If ADMIN_PASSWORD isn't set, the
+  // dashboard stays open (dev-friendly default) but a warning is logged once at boot.
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+  if (!ADMIN_PASSWORD) {
+    console.warn('[Security] ADMIN_PASSWORD is not set — the /api/v1/analytics dashboard is currently open to anyone. Set ADMIN_PASSWORD in your environment to protect it.');
+  }
+  const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!ADMIN_PASSWORD) return next(); // no password configured -> leave as-is
+    const provided = req.header('x-admin-key');
+    if (provided && provided === ADMIN_PASSWORD) return next();
+    return res.status(401).json({ error: 'Unauthorized. Admin password required.' });
+  };
+
   // Initialize Gemini AI Client (for legacy fallback if needed)
   function getGenAI() {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -94,6 +109,13 @@ You assist developers, students, and professionals with:
         temperature,
       });
 
+      if (result.status === 'error' || result.noProviderAvailable) {
+        return res.status(503).json({
+          error: result.errorMessage || 'No AI provider is configured or all providers failed.',
+          noProviderAvailable: true,
+        });
+      }
+
       res.json(result);
     } catch (error: any) {
       console.error('Error in /api/v1/chat:', error);
@@ -122,6 +144,13 @@ You assist developers, students, and professionals with:
         userKeys,
       });
 
+      if (result.status === 'error' || result.noProviderAvailable) {
+        return res.status(503).json({
+          error: result.errorMessage || 'No AI provider is configured or all providers failed.',
+          noProviderAvailable: true,
+        });
+      }
+
       res.json({
         reply: result.reply,
         modelUsed: result.modelUsed,
@@ -140,8 +169,10 @@ You assist developers, students, and professionals with:
   });
 
   // 3. Provider List & Status Endpoint
-  app.get('/api/v1/providers', (req, res) => {
-    const userKeys = req.query.userKeys ? JSON.parse(req.query.userKeys as string) : undefined;
+  // POST (not GET+query) so any userKeys passed in aren't leaked into URLs,
+  // server access logs, browser history, or proxy logs.
+  app.post('/api/v1/providers', (req, res) => {
+    const userKeys = req.body?.userKeys;
     const adapters = routingEngine.getAllAdapters();
 
     const providerList = adapters.map((a) => ({
@@ -151,6 +182,18 @@ You assist developers, students, and professionals with:
       models: a.models,
     }));
 
+    res.json({ success: true, providers: providerList });
+  });
+
+  // Back-compat: GET without keys (env-configured providers only, no key leakage risk)
+  app.get('/api/v1/providers', (_req, res) => {
+    const adapters = routingEngine.getAllAdapters();
+    const providerList = adapters.map((a) => ({
+      id: a.id,
+      name: a.name,
+      isConfigured: a.isAvailable(undefined),
+      models: a.models,
+    }));
     res.json({ success: true, providers: providerList });
   });
 
@@ -170,14 +213,14 @@ You assist developers, students, and professionals with:
   });
 
   // 5. Admin Analytics Metrics Endpoint
-  app.get('/api/v1/analytics', (req, res) => {
+  app.get('/api/v1/analytics', requireAdmin, (req, res) => {
     const userKeys = req.query.userKeys ? JSON.parse(req.query.userKeys as string) : undefined;
     const analytics = routingEngine.getAnalyticsMetrics(userKeys);
     res.json({ success: true, analytics });
   });
 
   // 6. Admin Analytics Reset
-  app.post('/api/v1/analytics/reset', (_req, res) => {
+  app.post('/api/v1/analytics/reset', requireAdmin, (_req, res) => {
     routingEngine.resetAnalytics();
     res.json({ success: true, message: 'Analytics logs reset successfully.' });
   });
@@ -242,45 +285,14 @@ Language preference: ${language}`;
       }
     }
 
-    // Fallback if rate limited or API offline
+    // If generation truly failed (no key / all attempts failed), tell the truth
+    // instead of silently returning generic placeholder content as a "success".
     if (!pdfData) {
-      pdfData = {
-        title: `${topic} Executive Report`,
-        subtitle: `Structured Strategic Overview & Operational Plan`,
-        author: `BuildMate AI Enterprise Engine`,
-        date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-        summary: `This report provides a comprehensive strategic summary and detailed operational breakdown regarding "${topic}". Prepared by BuildMate AI Router.`,
-        sections: [
-          {
-            heading: `1. Executive Summary & Context`,
-            content: `An in-depth evaluation of ${topic} reveals critical opportunities for process optimization, technology adoption, and structured execution.`,
-            bulletPoints: [
-              `Primary Objective: Establish high-impact deliverables for ${topic}.`,
-              `Scope: Comprehensive architecture review and implementation timeline.`,
-              `Resource Allocation: Cross-functional team alignment.`
-            ]
-          },
-          {
-            heading: `2. Technical & Strategic Analysis`,
-            content: `Key findings demonstrate robust viability. Implementation should focus on high efficiency and security protocols.`,
-            bulletPoints: [
-              `Scalability: Modular system design ensuring future extensibility.`,
-              `Risk Mitigation: Proactive compliance and contingency planning.`,
-              `Performance Metrics: Real-time telemetry monitoring.`
-            ]
-          },
-          {
-            heading: `3. Recommendations & Action Items`,
-            content: `Immediate next steps involve finalizing the roadmap and establishing automated deployment pipelines.`,
-            bulletPoints: [
-              `Phase 1: Environment setup and initial testing.`,
-              `Phase 2: Deployment and user acceptance testing.`,
-              `Phase 3: Continuous monitoring and optimization.`
-            ]
-          }
-        ],
-        conclusion: `By following the proposed framework for ${topic}, organizations can maximize efficiency and achieve predictable high-performance results.`
-      };
+      return res.status(503).json({
+        success: false,
+        noProviderAvailable: true,
+        error: 'PDF content generate nahi ho saka. Koi AI provider available nahi hai — apni Custom API key add karein.',
+      });
     }
 
     res.json({ success: true, pdfData });
@@ -339,83 +351,13 @@ Language preference: ${language}`;
       }
     }
 
-    // Fallback if rate limited or API offline
+    // If generation truly failed, tell the truth instead of returning canned slides as "success".
     if (!presentation) {
-      const numSlides = Math.min(Math.max(Number(slideCount) || 5, 3), 10);
-      const generatedSlides = [];
-
-      generatedSlides.push({
-        slideNumber: 1,
-        title: `Introduction to ${topic}`,
-        layout: 'Title Slide',
-        bulletPoints: [
-          `Welcome & Session Objectives`,
-          `Target Audience: ${audience}`,
-          `Key Drivers & High-Level Overview`
-        ],
-        speakerNotes: `Good day everyone. Today we are presenting a strategic deep dive into ${topic}.`,
-        visualPrompt: `Professional modern minimalist slide background representing ${topic}`
+      return res.status(503).json({
+        success: false,
+        noProviderAvailable: true,
+        error: 'Presentation generate nahi ho saki. Koi AI provider available nahi hai — apni Custom API key add karein.',
       });
-
-      generatedSlides.push({
-        slideNumber: 2,
-        title: `Key Challenges & Opportunities`,
-        layout: 'Two Column',
-        bulletPoints: [
-          `Market Trends & Current Landscape`,
-          `Core Bottlenecks to Address`,
-          `Growth Potentials & Competitive Advantage`
-        ],
-        speakerNotes: `Examining the current landscape highlights both critical operational challenges and high-value opportunities.`,
-        visualPrompt: `Comparison diagram displaying challenges versus growth metrics`
-      });
-
-      generatedSlides.push({
-        slideNumber: 3,
-        title: `Strategic Architecture & Solution`,
-        layout: 'Diagram / Process',
-        bulletPoints: [
-          `Modular Framework Design`,
-          `End-to-End Workflow Integration`,
-          `Security & Compliance Baseline`
-        ],
-        speakerNotes: `Our proposed architecture ensures maximum modularity, resilience, and fast turnaround.`,
-        visualPrompt: `Flowchart illustrating end-to-end system workflow`
-      });
-
-      for (let i = 4; i < numSlides; i++) {
-        generatedSlides.push({
-          slideNumber: i,
-          title: `Implementation Phase ${i - 3}: Execution`,
-          layout: 'Bullet List',
-          bulletPoints: [
-            `Key Milestone Deliverables`,
-            `Resource Allocation & Timelines`,
-            `Continuous Feedback & Testing`
-          ],
-          speakerNotes: `In phase ${i - 3}, execution focuses on delivery velocity and iterative refinement.`,
-          visualPrompt: `Gantt chart timeline graphic with blue and purple milestones`
-        });
-      }
-
-      generatedSlides.push({
-        slideNumber: numSlides,
-        title: `Conclusion & Next Steps`,
-        layout: 'Summary Slide',
-        bulletPoints: [
-          `Summary of Strategic Value`,
-          `Immediate Action Items`,
-          `Q&A and Discussion`
-        ],
-        speakerNotes: `Thank you for your attention. We are ready to answer any questions and kick off next steps.`,
-        visualPrompt: `Clean summary slide with contact information and thank you graphics`
-      });
-
-      presentation = {
-        presentationTitle: topic,
-        presentationSubtitle: `Strategic Presentation Deck (${audience})`,
-        slides: generatedSlides
-      };
     }
 
     res.json({ success: true, presentation });
@@ -474,34 +416,81 @@ Language preference: ${language}`;
       }
     }
 
-    // Fallback if rate limited or API offline
+    // If generation truly failed, tell the truth instead of returning a canned summary as "success".
     if (!summaryData) {
-      summaryData = {
-        documentTitle: filename,
-        executiveSummary: `Analysis of "${filename}": The document provides structured information regarding key operational procedures, project milestones, and guidelines. Processed by BuildMate AI.`,
-        keyTakeaways: [
-          `Document Source: ${filename}`,
-          `Core Focus: Workflow efficiency, guidelines, and key deliverables.`,
-          `Status: Analyzed and categorized successfully.`
-        ],
-        mainTopics: [
-          {
-            topic: `Primary Content Overview`,
-            details: textContent ? textContent.substring(0, 200) + '...' : `Structured document content review.`
-          },
-          {
-            topic: `Operational Framework`,
-            details: `Guidelines and specifications outlined within the document.`
-          }
-        ],
-        actionItems: [
-          `Review document recommendations with team members.`,
-          `Integrate key findings into upcoming planning cycle.`
-        ]
-      };
+      return res.status(503).json({
+        success: false,
+        noProviderAvailable: true,
+        error: 'Document summarize nahi ho saka. Koi AI provider available nahi hai — apni Custom API key add karein.',
+      });
     }
 
     res.json({ success: true, summary: summaryData });
+  });
+
+  // Specialized API: Full Multi-File Project Generation
+  app.post('/api/generate-project', async (req, res) => {
+    const { topic = 'New Project', language = 'javascript', description = '' } = req.body;
+
+    const prompt = `Generate a small, complete, working ${language} project for: "${topic}".
+${description ? `Additional requirements: ${description}` : ''}
+Return ONLY a valid JSON object (no markdown fences, no commentary) with this exact shape:
+{
+  "projectName": "short-kebab-case-name",
+  "description": "one sentence summary of the project",
+  "files": [
+    { "path": "relative/file/path.ext", "content": "full file content as a string" }
+  ]
+}
+Rules:
+- Include 3 to 8 files that together form a working, runnable project (entry file, config/package file if relevant, README.md).
+- Use realistic, production-quality code with comments.
+- Escape all special characters correctly so the JSON parses cleanly.`;
+
+    let project: any = null;
+    let noProviderAvailable = false;
+
+    try {
+      const result = await routingEngine.routeChat({
+        message: prompt,
+        category: 'Coding',
+        strategy: 'auto',
+      });
+
+      if (result.status === 'error' || result.noProviderAvailable) {
+        noProviderAvailable = true;
+      } else {
+        let raw = (result.reply || '').trim();
+        // Strip markdown code fences if the model wrapped the JSON anyway
+        raw = raw.replace(/^```(json)?/i, '').replace(/```$/i, '').trim();
+
+        const firstBrace = raw.indexOf('{');
+        const lastBrace = raw.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          raw = raw.slice(firstBrace, lastBrace + 1);
+        }
+
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.files) && parsed.files.length > 0) {
+          project = parsed;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Project Generator] Failed to parse structured project:', err?.message || err);
+    }
+
+    // If generation truly failed, tell the truth instead of returning a fake scaffold as "success".
+    if (!project) {
+      return res.status(503).json({
+        success: false,
+        noProviderAvailable,
+        error: noProviderAvailable
+          ? 'Project generate nahi ho saka. Koi AI provider available nahi hai — apni Custom API key add karein.'
+          : 'Project generate nahi ho saka. Dobara koshish karein.',
+      });
+    }
+
+    res.json({ success: true, project });
   });
 
   // Auto Session Title Generation Endpoint

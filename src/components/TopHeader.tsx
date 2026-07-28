@@ -32,8 +32,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onToggleMobileLeftSidebar,
   onToggleMobileRightSidebar,
 }) => {
-  const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false);
-
   return (
     <header className="h-14 bg-slate-950/90 border-b border-indigo-900/40 px-3 sm:px-4 flex items-center justify-between text-slate-200 select-none backdrop-blur-md sticky top-0 z-40">
       {/* Left: Hamburger + Brand Identity */}
@@ -62,62 +60,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         </div>
       </div>
 
-      {/* Center: Smart Router & Model Selector */}
+      {/* Center: Smart Router Status (fully automatic - no manual selection needed) */}
       <div className="flex items-center gap-1.5 sm:gap-2">
         <div
-          className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-700/60 text-xs font-bold text-indigo-200 shadow"
-          title="AI provider is selected automatically"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-700/60 text-xs font-bold text-indigo-200 shadow"
+          title="AI engine, model & API key are all selected and managed automatically"
         >
-          <Activity className="w-3.5 h-3.5 text-purple-400" />
-          <span>⚡ Auto AI Routing</span>
-        </div>
-
-        <div className="relative">
-          <button
-            onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-            className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-900/80 border border-indigo-900/50 hover:border-indigo-500/50 text-xs text-slate-200 transition-all shadow-inner max-w-[160px] sm:max-w-xs"
-          >
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0" />
-            <span className="font-medium truncate text-[11px] sm:text-xs">{selectedModel.name}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-          </button>
-
-          {modelDropdownOpen && (
-            <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-64 sm:w-72 bg-slate-900 border border-indigo-800/60 rounded-xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2">
-              <div className="text-[11px] font-semibold text-slate-400 px-2 py-1 uppercase tracking-wider flex items-center justify-between">
-                <span>Select AI Engine</span>
-                <button onClick={() => setModelDropdownOpen(false)} className="text-slate-500 hover:text-white">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              {models.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => {
-                    onSelectModel(model);
-                    setModelDropdownOpen(false);
-                  }}
-                  className={`w-full text-left p-2 rounded-lg flex items-center justify-between text-xs transition-colors my-0.5 ${
-                    selectedModel.id === model.id
-                      ? 'bg-indigo-600/30 border border-indigo-500/50 text-white'
-                      : 'hover:bg-slate-800 text-slate-300'
-                  }`}
-                >
-                  <div>
-                    <div className="font-medium flex items-center gap-1.5">
-                      {model.name}
-                      <span className="text-[8px] px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                        {model.badge}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">
-                      {model.description}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0" />
+          <Activity className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+          <span className="hidden sm:inline">⚡ Auto AI Routing Active</span>
+          <span className="sm:hidden">⚡ Auto AI</span>
         </div>
       </div>
 

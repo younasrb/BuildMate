@@ -15,13 +15,27 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'fallback' | 'failed'>('all');
+  const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem('buildmate_admin_key') || '');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = async (keyOverride?: string) => {
     setIsLoading(true);
+    setAuthError(null);
     try {
-      const res = await fetch('/api/v1/analytics');
+      const key = keyOverride ?? adminKey;
+      const res = await fetch('/api/v1/analytics', {
+        headers: key ? { 'x-admin-key': key } : {},
+      });
+      if (res.status === 401) {
+        setAuthRequired(true);
+        setMetrics(null);
+        return;
+      }
       const data = await res.json();
       if (data.success) {
+        setAuthRequired(false);
         setMetrics(data.analytics);
       }
     } catch (e) {
@@ -29,6 +43,20 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleUnlock = async () => {
+    setAuthError(null);
+    const res = await fetch('/api/v1/analytics', {
+      headers: { 'x-admin-key': passwordInput },
+    });
+    if (res.status === 401) {
+      setAuthError('Galat password. Dobara koshish karein.');
+      return;
+    }
+    sessionStorage.setItem('buildmate_admin_key', passwordInput);
+    setAdminKey(passwordInput);
+    await fetchMetrics(passwordInput);
   };
 
   useEffect(() => {
@@ -39,12 +67,54 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
   const handleResetLogs = async () => {
     if (confirm('Are you sure you want to reset all API request logs?')) {
-      await fetch('/api/v1/analytics/reset', { method: 'POST' });
+      await fetch('/api/v1/analytics/reset', {
+        method: 'POST',
+        headers: adminKey ? { 'x-admin-key': adminKey } : {},
+      });
       fetchMetrics();
     }
   };
 
   if (!isOpen) return null;
+
+  if (authRequired) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+        <div className="w-full max-w-sm bg-slate-900 border border-indigo-800/60 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="px-6 py-4 bg-slate-950 border-b border-indigo-900/40 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-400" />
+              <h3 className="font-bold text-sm text-white">Admin Access Required</h3>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="p-6 space-y-3">
+            <p className="text-xs text-slate-400">
+              Ye dashboard usage logs aur cost data dikhata hai — sirf admin ke liye protected hai. Password enter karein.
+            </p>
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
+              placeholder="Admin password"
+              autoFocus
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-sm focus:border-indigo-500 focus:outline-none font-mono"
+            />
+            {authError && <p className="text-[11px] text-rose-400">{authError}</p>}
+            <button
+              onClick={handleUnlock}
+              className="w-full px-3 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors cursor-pointer"
+            >
+              Unlock Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const filteredLogs = metrics?.recentLogs?.filter((log) => {
     const matchesSearch =

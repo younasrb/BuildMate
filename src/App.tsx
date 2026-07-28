@@ -8,6 +8,7 @@ import {
   SummaryData,
   ModelCategory,
   ChatSession,
+  ProjectData,
 } from './types';
 import { INITIAL_USER, AI_MODELS, QUICK_ACTIONS, INITIAL_RECENT_FILES, COMMAND_SHORTCUTS } from './data/initialData';
 import { TopHeader } from './components/TopHeader';
@@ -41,6 +42,28 @@ export default function App() {
   // provider for this category from server-side environment API keys -
   // there is no manual provider/key selection in the UI.
   const [selectedCategory, setSelectedCategory] = useState<ModelCategory>('Balanced');
+
+  // Optional personal API keys (auto-loaded from localStorage). When present,
+  // these are sent to the backend so the Smart Router prefers the user's own
+  // key first before falling back to the shared server key - this avoids
+  // hitting shared rate limits. Fully optional; app works with zero setup.
+  const [userKeys, setUserKeys] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('buildmate_user_keys');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('buildmate_user_keys', JSON.stringify(userKeys));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [userKeys]);
 
   // Sessions state with localStorage persistence
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
@@ -120,6 +143,8 @@ export default function App() {
   const [welcomeNoteModalOpen, setWelcomeNoteModalOpen] = useState(true);
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [presentationModalOpen, setPresentationModalOpen] = useState(false);
+  const [pendingDocTopic, setPendingDocTopic] = useState('');
+  const [pendingPresentationTopic, setPendingPresentationTopic] = useState('');
   const [codeModalOpen, setCodeModalOpen] = useState(false);
   const [summarizerModalOpen, setSummarizerModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -161,11 +186,76 @@ export default function App() {
   };
 
   // Send message to Custom API Chat Router Proxy
+  // Detects what kind of deliverable the user is asking for directly from
+  // normal chat text (Roman Urdu or English) so they don't have to click a
+  // Quick Action button - typing "presentation banao" or "word document chahiye"
+  // works exactly like clicking the matching tool.
+  const detectCreationIntent = (text: string): 'presentation' | 'document' | 'code' | null => {
+    const t = text.toLowerCase();
+
+    const presentationWords = ['presentation', 'slide', 'slides', 'ppt', 'pptx', 'slideshow', 'deck'];
+    if (presentationWords.some((w) => t.includes(w))) return 'presentation';
+
+    const documentWords = ['word document', 'word doc', 'docx', 'ms word', 'report banao', 'report likho', 'document banao', 'document likho', 'pdf', 'report'];
+    if (documentWords.some((w) => t.includes(w))) return 'document';
+
+    const codeWords = ['code likho', 'code likh do', 'code banao', 'write code', 'generate code', 'code chahiye'];
+    if (codeWords.some((w) => t.includes(w))) return 'code';
+
+    return null;
+  };
+
+  // Strips trigger/filler words ("presentation chahiye", "banao", "ka topic",
+  // "on", "about", etc.) from the user's sentence so only the real subject
+  // (e.g. "AI in Education") is left to pre-fill into the generator.
+  const extractTopic = (text: string, intent: 'presentation' | 'document' | 'code'): string => {
+    let cleaned = text;
+
+    const triggerPhrases = [
+      'word document', 'word doc', 'ms word', 'docx',
+      'presentation', 'slideshow', 'slides', 'slide deck', 'slide', 'deck',
+      'ppt', 'pptx', 'report banao', 'report likho', 'document banao',
+      'document likho', 'report', 'document', 'pdf',
+      'code likh do', 'code likho', 'write code', 'generate code', 'code chahiye', 'code banao',
+      'chahiye', 'banado', 'banao', 'bana do', 'bana den', 'bana dein', 'likho', 'likh do',
+      'please', 'ka topic per', 'ka topic pe', 'ka topic par', 'ke topic per', 'ke topic pe',
+      'ke topic par', 'ka topic', 'ke topic', 'topic par', 'topic pe', 'topic per', 'topic',
+      'ke bare mein', 'ke baray mein', 'k baray mein', 'about', 'on the topic of',
+    ];
+
+    for (const phrase of triggerPhrases) {
+      cleaned = cleaned.replace(new RegExp(phrase, 'gi'), ' ');
+    }
+
+    cleaned = cleaned
+      .replace(/\s+/g, ' ')
+      .replace(/^(par|pe|per|ka|ki|ke|on|of|the|a|an)\b\s*/i, '')
+      .replace(/\s*\b(par|pe|per|ka|ki|ke)$/i, '')
+      .replace(/^[\s,.\-:;]+/, '')
+      .replace(/[\s,.\-:;]+$/, '')
+      .trim();
+
+    return cleaned.length >= 2 ? cleaned : text;
+  };
+
   const handleSendMessage = async (
     text: string,
     fileAttachment?: { name: string; size: string; type: string; content?: string },
     categoryOverride?: ModelCategory
   ) => {
+    // If the message clearly asks for a presentation, document, or code,
+    // open the matching generator tool automatically alongside the reply.
+    const intent = detectCreationIntent(text);
+    if (intent === 'presentation') {
+      setPendingPresentationTopic(extractTopic(text, intent));
+      setPresentationModalOpen(true);
+    } else if (intent === 'document') {
+      setPendingDocTopic(extractTopic(text, intent));
+      setPdfModalOpen(true);
+    } else if (intent === 'code') {
+      setCodeModalOpen(true);
+    }
+
     const userMsg: Message = {
       id: `u-${Date.now()}`,
       role: 'user',
@@ -209,14 +299,21 @@ export default function App() {
         body: JSON.stringify({
           message: text,
           category: categoryOverride || selectedCategory || 'Balanced',
+          strategy: 'auto',
           fileContext: fileAttachment ? [fileAttachment] : undefined,
           history: updatedMessagesWithUser.map((m) => ({ role: m.role, text: m.content })),
+          userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
+        if (data.noProviderAvailable) {
+          const err: any = new Error(data.error || 'No AI provider is configured.');
+          err.noProviderAvailable = true;
+          throw err;
+        }
         throw new Error(data.error || 'Failed to communicate with BuildMate AI Router.');
       }
 
@@ -244,12 +341,20 @@ export default function App() {
       );
     } catch (err: any) {
       console.error(err);
+
+      const isNoProvider = !!err?.noProviderAvailable;
       const errorMsg: Message = {
         id: `err-${Date.now()}`,
         role: 'assistant',
-        content: `Aap ke query par processing karte waqt chota masla aya: ${err.message || 'Server response delayed'}. Thodi dair baad dobara try karein.`,
+        content: isNoProvider
+          ? `⚠️ Koi bhi AI provider configured nahi hai ya sab providers fail ho gaye hain: "${err.message}"\n\nBraye meherbani Settings kholkar apni Custom API key add karein — Settings panel apne aap khul raha hai. Free API key Google AI Studio (Gemini) ya Groq se chand minutes mein mil jati hai — "API Status" tab mein links diye gaye hain.`
+          : `⚠️ Request process nahi ho saki: ${err?.message || 'Unknown error.'}\n\nBraye meherbani dobara koshish karein.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
+
+      if (isNoProvider) {
+        setSettingsModalOpen(true);
+      }
 
       setSessions((prev) =>
         prev.map((s) =>
@@ -286,6 +391,12 @@ export default function App() {
       body: JSON.stringify({ topic, instructions }),
     });
     const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      if (data.noProviderAvailable) setSettingsModalOpen(true);
+      throw new Error(data.error || 'PDF generate nahi ho saka.');
+    }
+
     if (data.success && data.pdfData) {
       const newFile: RecentFile = {
         id: `rf-${Date.now()}`,
@@ -308,6 +419,12 @@ export default function App() {
       body: JSON.stringify({ topic, slideCount }),
     });
     const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      if (data.noProviderAvailable) setSettingsModalOpen(true);
+      throw new Error(data.error || 'Presentation generate nahi ho saki.');
+    }
+
     if (data.success && data.presentation) {
       const newFile: RecentFile = {
         id: `rf-${Date.now()}`,
@@ -323,6 +440,34 @@ export default function App() {
   };
 
   // Generate Code via API
+  // Generate a full multi-file project via Custom API
+  const handleGenerateProject = async (topic: string, language: string): Promise<ProjectData | void> => {
+    const res = await fetch('/api/generate-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, language }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      if (data.noProviderAvailable) setSettingsModalOpen(true);
+      throw new Error(data.error || 'Project generate nahi ho saka.');
+    }
+
+    if (data.success && data.project) {
+      const newFile: RecentFile = {
+        id: `rf-${Date.now()}`,
+        name: `${data.project.projectName || topic}.project`,
+        type: 'code',
+        date: 'Just now',
+        size: `${data.project.files.length} files`,
+        content: JSON.stringify(data.project),
+      };
+      setRecentFiles((prev) => [newFile, ...prev]);
+      return data.project as ProjectData;
+    }
+  };
+
   const handleGenerateCode = async (prompt: string, language: string) => {
     const res = await fetch('/api/v1/chat', {
       method: 'POST',
@@ -333,6 +478,14 @@ export default function App() {
       }),
     });
     const data = await res.json();
+
+    if (!res.ok) {
+      if (data.noProviderAvailable) {
+        setSettingsModalOpen(true);
+      }
+      throw new Error(data.error || 'Failed to generate code.');
+    }
+
     const reply = data.reply || '';
 
     const codeMatch = reply.match(/```(?:\w+)?\n([\s\S]*?)```/);
@@ -362,6 +515,12 @@ export default function App() {
       body: JSON.stringify({ textContent, filename }),
     });
     const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      if (data.noProviderAvailable) setSettingsModalOpen(true);
+      throw new Error(data.error || 'Document summarize nahi ho saka.');
+    }
+
     if (data.success && data.summary) {
       return data.summary;
     }
@@ -825,6 +984,7 @@ export default function App() {
         isOpen={pdfModalOpen}
         onClose={() => setPdfModalOpen(false)}
         initialData={activePdfData}
+        initialTopic={pendingDocTopic}
         onGeneratePDF={handleGeneratePDF}
       />
 
@@ -832,6 +992,7 @@ export default function App() {
         isOpen={presentationModalOpen}
         onClose={() => setPresentationModalOpen(false)}
         initialData={activePresentationData}
+        initialTopic={pendingPresentationTopic}
         onGeneratePresentation={handleGeneratePresentation}
       />
 
@@ -841,6 +1002,7 @@ export default function App() {
         initialCode={activeCodeData?.code}
         initialLanguage={activeCodeData?.language}
         onGenerateCode={handleGenerateCode}
+        onGenerateProject={handleGenerateProject}
       />
 
       <SummarizerModal
@@ -859,6 +1021,8 @@ export default function App() {
         onSelectModel={setSelectedModel}
         darkMode={darkMode}
         onToggleTheme={() => setDarkMode(!darkMode)}
+        userKeys={userKeys}
+        onUpdateUserKeys={setUserKeys}
       />
 
       <AdminDashboardModal
