@@ -9,7 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](#)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](#)
 
-**[Live App](https://buildmate-rosy.vercel.app/) · [Source Code](https://github.com/younasrb/BuildMate)**
+**[Live App](https://buildmate-ai.vercel.app/) · [Source Code](https://github.com/younasrb/BuildMate)**
 
 </div>
 
@@ -196,7 +196,7 @@ The project is ready to deploy on Vercel.
 
 The live app is available here:
 
-**https://buildmate-rosy.vercel.app/**
+**https://buildmate-ai.vercel.app/**
 
 ---
 
