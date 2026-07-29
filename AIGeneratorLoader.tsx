@@ -1,362 +1,244 @@
-import React, { useState, useEffect } from 'react';
-import { AnalyticsMetrics } from '../../types';
-import { X, Activity, DollarSign, Cpu, Clock, CheckCircle2, AlertTriangle, RefreshCw, Search, ShieldCheck, Database, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { PDFData } from '../../types';
+import { downloadPDF, PDF_THEME_OPTIONS, PDFTheme } from '../../utils/pdfGenerator';
+import { downloadWordDocument } from '../../utils/exporter';
+import { X, FileText, Download, Sparkles, RefreshCw, Layers, FileCode, ExternalLink, Palette } from 'lucide-react';
+import confetti from 'canvas-confetti';
+import { AIGeneratorLoader } from '../AIGeneratorLoader';
 
-interface AdminDashboardModalProps {
+interface PDFGeneratorModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialData?: PDFData | null;
+  initialTopic?: string;
+  onGeneratePDF: (topic: string, instructions: string) => Promise<PDFData | void>;
 }
 
-export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
+export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
   isOpen,
   onClose,
+  initialData,
+  initialTopic,
+  onGeneratePDF,
 }) => {
-  const [metrics, setMetrics] = useState<AnalyticsMetrics | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'fallback' | 'failed'>('all');
-  const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem('buildmate_admin_key') || '');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [authRequired, setAuthRequired] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [topic, setTopic] = useState('');
+  const [instructions, setInstructions] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [pdfData, setPdfData] = useState<PDFData | null>(initialData || null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pdfTheme, setPdfTheme] = useState<PDFTheme>('indigo');
 
-  const fetchMetrics = async (keyOverride?: string) => {
-    setIsLoading(true);
-    setAuthError(null);
-    try {
-      const key = keyOverride ?? adminKey;
-      const res = await fetch('/api/v1/analytics', {
-        headers: key ? { 'x-admin-key': key } : {},
-      });
-      if (res.status === 401) {
-        setAuthRequired(true);
-        setMetrics(null);
-        return;
-      }
-      const data = await res.json();
-      if (data.success) {
-        setAuthRequired(false);
-        setMetrics(data.analytics);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsLoading(false);
+  React.useEffect(() => {
+    if (isOpen && initialTopic && initialTopic.trim()) {
+      setTopic(initialTopic.trim());
     }
-  };
-
-  const handleUnlock = async () => {
-    setAuthError(null);
-    const res = await fetch('/api/v1/analytics', {
-      headers: { 'x-admin-key': passwordInput },
-    });
-    if (res.status === 401) {
-      setAuthError('Galat password. Dobara koshish karein.');
-      return;
-    }
-    sessionStorage.setItem('buildmate_admin_key', passwordInput);
-    setAdminKey(passwordInput);
-    await fetchMetrics(passwordInput);
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      fetchMetrics();
-    }
-  }, [isOpen]);
-
-  const handleResetLogs = async () => {
-    if (confirm('Are you sure you want to reset all API request logs?')) {
-      await fetch('/api/v1/analytics/reset', {
-        method: 'POST',
-        headers: adminKey ? { 'x-admin-key': adminKey } : {},
-      });
-      fetchMetrics();
-    }
-  };
+  }, [isOpen, initialTopic]);
 
   if (!isOpen) return null;
 
-  if (authRequired) {
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-        <div className="w-full max-w-sm bg-slate-900 border border-indigo-800/60 rounded-2xl shadow-2xl overflow-hidden">
-          <div className="px-6 py-4 bg-slate-950 border-b border-indigo-900/40 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-indigo-400" />
-              <h3 className="font-bold text-sm text-white">Admin Access Required</h3>
-            </div>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="p-6 space-y-3">
-            <p className="text-xs text-slate-400">
-              Ye dashboard usage logs aur cost data dikhata hai — sirf admin ke liye protected hai. Password enter karein.
-            </p>
-            <input
-              type="password"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
-              placeholder="Admin password"
-              autoFocus
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-sm focus:border-indigo-500 focus:outline-none font-mono"
-            />
-            {authError && <p className="text-[11px] text-rose-400">{authError}</p>}
-            <button
-              onClick={handleUnlock}
-              className="w-full px-3 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors cursor-pointer"
-            >
-              Unlock Dashboard
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handleGenerate = async () => {
+    if (!topic.trim()) return;
+    setIsGenerating(true);
+    setErrorMsg(null);
+    try {
+      const result = await onGeneratePDF(topic, instructions);
+      if (result) {
+        setPdfData(result);
+        confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+      }
+    } catch (e: any) {
+      console.error(e);
+      setErrorMsg(e?.message || 'PDF generate nahi ho saka. Dobara koshish karein.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-  const filteredLogs = metrics?.recentLogs?.filter((log) => {
-    const matchesSearch =
-      log.provider.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.model.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.category.toLowerCase().includes(searchQuery.toLowerCase());
-
-    if (statusFilter === 'all') return matchesSearch;
-    return matchesSearch && log.status === statusFilter;
-  });
+  const handleDownload = () => {
+    if (pdfData) {
+      downloadPDF(pdfData, pdfTheme);
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-      <div className="w-full max-w-5xl bg-slate-900 border border-indigo-800/60 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="w-full max-w-3xl bg-slate-900 border border-indigo-800/60 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-4 bg-slate-950 border-b border-indigo-900/40 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-indigo-600 text-white flex items-center justify-center shadow-lg">
-              <Activity className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center">
+              <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white flex items-center gap-2">
-                Enterprise Router Admin Dashboard
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Live System Metrics
-                </span>
+              <h3 className="font-bold text-base text-white">
+                PDF Report Studio
               </h3>
               <p className="text-xs text-slate-400">
-                Monitor request volume, cost tracking, token usage, latency, & provider health
+                Generate structured PDF reports with Executive Summaries & Sections
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={fetchMetrics}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-              title="Refresh Analytics"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-indigo-400' : ''}`} />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
-          {/* Top KPI Metric Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/40 space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between">
-                Total API Requests
-                <Database className="w-4 h-4 text-indigo-400" />
-              </span>
-              <div className="text-xl font-extrabold text-white font-mono">
-                {metrics?.totalRequests || 0}
-              </div>
-              <div className="text-[10px] text-emerald-400 font-medium">
-                {metrics?.successfulRequests || 0} Success | {metrics?.fallbackCount || 0} Fallbacks
-              </div>
+          {/* Input Form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950/60 p-4 rounded-xl border border-indigo-900/30">
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Report Topic / Title
+              </label>
+              <input
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. Discrete Structures & Hasse Diagrams"
+                className="w-full bg-slate-900 border border-indigo-900/60 rounded-lg p-2.5 text-slate-200 focus:border-indigo-500 focus:outline-none"
+              />
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/40 space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between">
-                Est. Cost (USD)
-                <DollarSign className="w-4 h-4 text-emerald-400" />
-              </span>
-              <div className="text-xl font-extrabold text-emerald-400 font-mono">
-                ${metrics?.totalCostUsd?.toFixed(4) || '0.0000'}
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium">
-                Token Cost Savings Active
-              </div>
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">
+                Custom Instructions (Optional)
+              </label>
+              <input
+                type="text"
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                placeholder="e.g. Include mathematical logic & graph theory examples"
+                className="w-full bg-slate-900 border border-indigo-900/60 rounded-lg p-2.5 text-slate-200 focus:border-indigo-500 focus:outline-none"
+              />
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/40 space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between">
-                Total Tokens Processed
-                <Cpu className="w-4 h-4 text-purple-400" />
-              </span>
-              <div className="text-xl font-extrabold text-white font-mono">
-                {metrics?.totalTokens?.toLocaleString() || 0}
+            {errorMsg && (
+              <div className="md:col-span-2 p-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs">
+                ⚠️ {errorMsg}
               </div>
-              <div className="text-[10px] text-purple-300 font-medium">
-                Input & Output Combined
-              </div>
-            </div>
+            )}
 
-            <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/40 space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between">
-                Avg Latency
-                <Clock className="w-4 h-4 text-amber-400" />
-              </span>
-              <div className="text-xl font-extrabold text-amber-300 font-mono">
-                {metrics?.avgLatencyMs || 0} ms
-              </div>
-              <div className="text-[10px] text-slate-400 font-medium">
-                Active Providers: {metrics?.activeProvidersCount || 1}
-              </div>
+            <div className="md:col-span-2 flex justify-end">
+              <button
+                onClick={handleGenerate}
+                disabled={!topic.trim() || isGenerating}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold transition-all flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                <span>{isGenerating ? 'Generating PDF Content...' : 'Generate Report Content'}</span>
+              </button>
             </div>
           </div>
 
-          {/* Provider Health Matrix */}
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-            <h4 className="font-bold text-white text-xs flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              Active Provider Health Matrix
-            </h4>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 font-mono text-[11px]">
-              {metrics?.providerHealth &&
-                Object.entries(metrics.providerHealth).map(([id, infoVal]) => {
-                  const info = infoVal as { configured?: boolean; latencyMs?: number; status?: string };
-                  return (
-                    <div
-                      key={id}
-                      className={`p-2.5 rounded-lg border flex flex-col justify-between ${
-                        info.configured
-                          ? 'bg-slate-900 border-slate-800'
-                          : 'bg-slate-900/40 border-slate-950 text-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-slate-200 uppercase text-[10px]">{id}</span>
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            info.configured ? 'bg-emerald-400 animate-pulse' : 'bg-slate-700'
-                          }`}
-                        ></span>
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        {info.configured ? `${info.latencyMs || 120}ms` : 'Not Configured'}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-
-          {/* API Request Audit Log Table */}
-          <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden space-y-3 p-4">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <h4 className="font-bold text-white text-xs">Request History Audit Log</h4>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
-                  {filteredLogs?.length || 0} Records
-                </span>
-              </div>
-
-              {/* Controls */}
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-48">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search logs..."
-                    className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 text-xs focus:outline-none"
-                  />
+          {/* PDF Preview Container or Engaging Loader */}
+          {isGenerating ? (
+            <AIGeneratorLoader
+              type="pdf"
+              title="Generating PDF Document Report..."
+              subtitle="Writing structured sections, executive summaries & Google Docs export formatted text."
+            />
+          ) : pdfData ? (
+            <div className="bg-slate-950 p-6 rounded-xl border border-indigo-900/50 space-y-4 font-sans text-slate-200">
+              <div className="border-b border-indigo-900/50 pb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-xl font-bold text-white">{pdfData.title}</h2>
+                  <p className="text-xs text-indigo-300 mt-0.5">{pdfData.subtitle}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    BY: {pdfData.author} | DATE: {pdfData.date}
+                  </p>
                 </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-amber-400" />
+                    <select
+                      value={pdfTheme}
+                      onChange={(e) => setPdfTheme(e.target.value as PDFTheme)}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none"
+                      title="Document template"
+                    >
+                      {PDF_THEME_OPTIONS.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleDownload}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </button>
 
-                <select
-                  value={statusFilter}
-                  onChange={(e: any) => setStatusFilter(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded-lg p-1.5 text-slate-300 text-xs focus:outline-none"
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="success">Success</option>
-                  <option value="fallback">Fallback</option>
-                  <option value="failed">Failed</option>
-                </select>
+                  <button
+                    onClick={() => {
+                      if (pdfData) {
+                        downloadWordDocument(pdfData, pdfTheme);
+                        confetti({ particleCount: 90, spread: 60 });
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                  >
+                    <FileCode className="w-3.5 h-3.5" />
+                    <span>Google Docs / Word (.doc)</span>
+                  </button>
 
-                <button
-                  onClick={handleResetLogs}
-                  className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-950/40 transition-colors border border-rose-900/30"
-                  title="Clear Logs"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                  <a
+                    href="https://docs.google.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    <span>Google Docs</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Summary Box */}
+              <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30">
+                <h4 className="font-bold text-indigo-300 uppercase tracking-wide text-[11px] mb-1">
+                  Executive Summary
+                </h4>
+                <p className="text-slate-300 leading-relaxed text-xs">{pdfData.summary}</p>
+              </div>
+
+              {/* Sections */}
+              <div className="space-y-4">
+                {pdfData.sections?.map((sec, idx) => (
+                  <div key={idx} className="space-y-1.5 p-3 rounded-lg bg-slate-900/80 border border-slate-800">
+                    <h5 className="font-bold text-white text-sm flex items-center gap-2">
+                      <Layers className="w-3.5 h-3.5 text-rose-400" />
+                      {sec.heading}
+                    </h5>
+                    <p className="text-slate-300 leading-relaxed">{sec.content}</p>
+                    {sec.bulletPoints && sec.bulletPoints.length > 0 && (
+                      <ul className="list-disc list-inside space-y-1 text-slate-400 pl-2">
+                        {sec.bulletPoints.map((bp, bidx) => (
+                          <li key={bidx}>{bp}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Conclusion */}
+              <div className="pt-2 border-t border-slate-800">
+                <h5 className="font-bold text-indigo-300 mb-1">Conclusion</h5>
+                <p className="text-slate-400 leading-relaxed">{pdfData.conclusion}</p>
               </div>
             </div>
-
-            {/* Table */}
-            <div className="overflow-x-auto max-h-64 overflow-y-auto">
-              <table className="w-full text-left font-mono text-[11px] text-slate-300">
-                <thead className="bg-slate-900 text-slate-400 sticky top-0 border-b border-slate-800">
-                  <tr>
-                    <th className="p-2">Time</th>
-                    <th className="p-2">Category</th>
-                    <th className="p-2">Provider & Model</th>
-                    <th className="p-2">Latency</th>
-                    <th className="p-2">Tokens</th>
-                    <th className="p-2">Cost (USD)</th>
-                    <th className="p-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-900">
-                  {filteredLogs && filteredLogs.length > 0 ? (
-                    filteredLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-900/60 transition-colors">
-                        <td className="p-2 text-slate-400 whitespace-nowrap">
-                          {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </td>
-                        <td className="p-2 font-bold text-indigo-300">{log.category}</td>
-                        <td className="p-2">
-                          <span className="uppercase text-slate-400 font-bold">{log.provider}:</span>{' '}
-                          <span className="text-white">{log.model}</span>
-                        </td>
-                        <td className="p-2 text-amber-300">{log.latencyMs}ms</td>
-                        <td className="p-2 text-purple-300">{log.totalTokens}</td>
-                        <td className="p-2 text-emerald-400">${log.estimatedCostUsd?.toFixed(5)}</td>
-                        <td className="p-2">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              log.status === 'success'
-                                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/30'
-                                : log.status === 'fallback'
-                                ? 'bg-amber-950/80 text-amber-300 border border-amber-500/30'
-                                : 'bg-rose-950/80 text-rose-300 border border-rose-500/30'
-                            }`}
-                          >
-                            {log.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={7} className="p-6 text-center text-slate-500">
-                        No request logs recorded yet. Send a prompt in chat to populate analytics!
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+          ) : (
+            <div className="text-center py-12 text-slate-500 border border-dashed border-slate-800 rounded-xl">
+              <FileText className="w-12 h-12 mx-auto text-slate-700 mb-2" />
+              <p className="text-xs">Enter a topic above and click "Generate Report Content" to preview & download a PDF.</p>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

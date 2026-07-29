@@ -1,1039 +1,652 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Message,
-  RecentFile,
-  AIModelOption,
-  PDFData,
-  PresentationData,
-  SummaryData,
-  ModelCategory,
-  ChatSession,
-  ProjectData,
-} from './types';
-import { INITIAL_USER, AI_MODELS, QUICK_ACTIONS, INITIAL_RECENT_FILES, COMMAND_SHORTCUTS } from './data/initialData';
-import { TopHeader } from './components/TopHeader';
-import { LeftSidebar } from './components/LeftSidebar';
-import { HeroBanner } from './components/HeroBanner';
-import { QuickActionsGrid } from './components/QuickActionsGrid';
-import { ChatSection } from './components/ChatSection';
-import { RightSidebar } from './components/RightSidebar';
-import { PDFGeneratorModal } from './components/modals/PDFGeneratorModal';
-import { PresentationModal } from './components/modals/PresentationModal';
-import { CodeEditorModal } from './components/modals/CodeEditorModal';
-import { SummarizerModal } from './components/modals/SummarizerModal';
-import { SettingsModal } from './components/modals/SettingsModal';
-import { AdminDashboardModal } from './components/modals/AdminDashboardModal';
-import { WelcomeNoteModal } from './components/modals/WelcomeNoteModal';
-import { MessageSquare, Plus, Cpu, Activity, Folder, ArrowDown, Sparkles, History, Search, Trash2, Edit3, Clock, Check, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Message, UserProfile, ModelCategory } from '../types';
+import { Send, Paperclip, Mic, MicOff, Bot, User, Copy, Check, Sparkles, X, Cpu, Zap, Activity, Volume2, VolumeX, PhoneCall, MessageSquare, Edit2 } from 'lucide-react';
+import { LiveVoiceCallModal } from './modals/LiveVoiceCallModal';
 
-export default function App() {
-  const [user] = useState(INITIAL_USER);
-  const [selectedModel, setSelectedModel] = useState<AIModelOption>(AI_MODELS[0]);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [darkMode, setDarkMode] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
+interface TypewriterTextProps {
+  content: string;
+  isLatest: boolean;
+  onTextUpdate?: () => void;
+}
 
-  // Responsive Drawer States
-  const [isMobileLeftSidebarOpen, setIsMobileLeftSidebarOpen] = useState(false);
-  const [isMobileRightSidebarOpen, setIsMobileRightSidebarOpen] = useState(false);
-
-  // Logical response category (Fast/Balanced/Premium/Reasoning/Coding/Vision).
-  // The backend Smart Router automatically picks the best configured AI
-  // provider for this category from server-side environment API keys -
-  // there is no manual provider/key selection in the UI.
-  const [selectedCategory, setSelectedCategory] = useState<ModelCategory>('Balanced');
-
-  // Optional personal API keys (auto-loaded from localStorage). When present,
-  // these are sent to the backend so the Smart Router prefers the user's own
-  // key first before falling back to the shared server key - this avoids
-  // hitting shared rate limits. Fully optional; app works with zero setup.
-  const [userKeys, setUserKeys] = useState<Record<string, any>>(() => {
-    try {
-      const saved = localStorage.getItem('buildmate_user_keys');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return {};
-  });
+const TypewriterText: React.FC<TypewriterTextProps> = ({ content, isLatest, onTextUpdate }) => {
+  const [displayedText, setDisplayedText] = useState(() => (isLatest ? '' : content));
+  const [isTyping, setIsTyping] = useState(() => isLatest);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('buildmate_user_keys', JSON.stringify(userKeys));
-    } catch (e) {
-      console.error(e);
+    if (!isLatest) {
+      setDisplayedText(content);
+      setIsTyping(false);
+      return;
     }
-  }, [userKeys]);
 
-  // Sessions state with localStorage persistence
-  const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    try {
-      const saved = localStorage.getItem('buildmate_chat_sessions');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    setDisplayedText('');
+    setIsTyping(true);
+
+    let currentIndex = 0;
+    const length = content.length;
+
+    // Adjust speed & chunk size so responses reveal smoothly like LLM stream tokens (~1-2.5s total)
+    const chunkSize = Math.max(2, Math.floor(length / 80));
+    const intervalTime = 20; // 20ms tick
+
+    const timer = setInterval(() => {
+      currentIndex += chunkSize;
+      if (currentIndex >= length) {
+        setDisplayedText(content);
+        setIsTyping(false);
+        clearInterval(timer);
+      } else {
+        setDisplayedText(content.slice(0, currentIndex));
       }
-    } catch (e) {
-      console.error(e);
+      onTextUpdate?.();
+    }, intervalTime);
+
+    return () => clearInterval(timer);
+  }, [content, isLatest]);
+
+  const handleSkip = () => {
+    if (isTyping) {
+      setDisplayedText(content);
+      setIsTyping(false);
     }
-    return [
-      {
-        id: 'session-default',
-        title: 'Welcome & Enterprise Router',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [
-          {
-            id: 'm-1',
-            role: 'assistant',
-            content: 'Assalam-o-Alaikum Younas! 😊\n\nBuildMate AI Enterprise Proxy & Intelligent Router set up! Kis tarah madad kar sakta hun aaj? Aap koi report, presentation, code ya analysis banwana chahte hain?',
-            timestamp: '10:30 AM',
-            providerUsed: 'gemini',
-            modelUsed: 'gemini-3.6-flash',
-            latencyMs: 85,
-          },
-        ],
-        isAutoTitled: true,
-      },
-    ];
-  });
-
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('buildmate_active_session_id');
-      if (saved) return saved;
-    } catch (e) {}
-    return 'session-default';
-  });
-
-  const [historySearchQuery, setHistorySearchQuery] = useState('');
-
-  // Save sessions to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('buildmate_chat_sessions', JSON.stringify(sessions));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [sessions]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('buildmate_active_session_id', activeSessionId);
-    } catch (e) {
-      console.error(e);
-    }
-  }, [activeSessionId]);
-
-  // Derived active session
-  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || {
-    id: 'session-default',
-    title: 'New Chat',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    messages: [],
-    isAutoTitled: false,
-  };
-
-  const activeMessages = activeSession.messages;
-
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>(INITIAL_RECENT_FILES);
-
-  // Modal visibility states
-  const [welcomeNoteModalOpen, setWelcomeNoteModalOpen] = useState(true);
-  const [pdfModalOpen, setPdfModalOpen] = useState(false);
-  const [presentationModalOpen, setPresentationModalOpen] = useState(false);
-  const [pendingDocTopic, setPendingDocTopic] = useState('');
-  const [pendingPresentationTopic, setPendingPresentationTopic] = useState('');
-  const [codeModalOpen, setCodeModalOpen] = useState(false);
-  const [summarizerModalOpen, setSummarizerModalOpen] = useState(false);
-  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-  const [adminDashboardModalOpen, setAdminDashboardModalOpen] = useState(false);
-
-  // Active data for modals
-  const [activePdfData, setActivePdfData] = useState<PDFData | null>(null);
-  const [activePresentationData, setActivePresentationData] = useState<PresentationData | null>(null);
-  const [activeCodeData, setActiveCodeData] = useState<{ code: string; language: string } | null>(null);
-  const [activeSummaryData, setActiveSummaryData] = useState<SummaryData | null>(null);
-
-  // Auto Generate Title for Session based on first few messages
-  const generateTitleForSession = async (sessionId: string, sessionMessages: Message[]) => {
-    try {
-      const userMsgs = sessionMessages.filter((m) => m.role === 'user');
-      if (userMsgs.length === 0) return;
-
-      const res = await fetch('/api/v1/generate-session-title', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: sessionMessages,
-        }),
-      });
-      const data = await res.json();
-      if (data.title && data.title.trim()) {
-        const generatedTitle = data.title.trim();
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === sessionId
-              ? { ...s, title: generatedTitle, isAutoTitled: true, updatedAt: new Date().toISOString() }
-              : s
-          )
-        );
-      }
-    } catch (err) {
-      console.error('Failed to generate session title:', err);
-    }
-  };
-
-  // Send message to Custom API Chat Router Proxy
-  // Detects what kind of deliverable the user is asking for directly from
-  // normal chat text (Roman Urdu or English) so they don't have to click a
-  // Quick Action button - typing "presentation banao" or "word document chahiye"
-  // works exactly like clicking the matching tool.
-  const detectCreationIntent = (text: string): 'presentation' | 'document' | 'code' | null => {
-    const t = text.toLowerCase();
-
-    const presentationWords = ['presentation', 'slide', 'slides', 'ppt', 'pptx', 'slideshow', 'deck'];
-    if (presentationWords.some((w) => t.includes(w))) return 'presentation';
-
-    const documentWords = ['word document', 'word doc', 'docx', 'ms word', 'report banao', 'report likho', 'document banao', 'document likho', 'pdf', 'report'];
-    if (documentWords.some((w) => t.includes(w))) return 'document';
-
-    const codeWords = ['code likho', 'code likh do', 'code banao', 'write code', 'generate code', 'code chahiye'];
-    if (codeWords.some((w) => t.includes(w))) return 'code';
-
-    return null;
-  };
-
-  // Strips trigger/filler words ("presentation chahiye", "banao", "ka topic",
-  // "on", "about", etc.) from the user's sentence so only the real subject
-  // (e.g. "AI in Education") is left to pre-fill into the generator.
-  const extractTopic = (text: string, intent: 'presentation' | 'document' | 'code'): string => {
-    let cleaned = text;
-
-    const triggerPhrases = [
-      'word document', 'word doc', 'ms word', 'docx',
-      'presentation', 'slideshow', 'slides', 'slide deck', 'slide', 'deck',
-      'ppt', 'pptx', 'report banao', 'report likho', 'document banao',
-      'document likho', 'report', 'document', 'pdf',
-      'code likh do', 'code likho', 'write code', 'generate code', 'code chahiye', 'code banao',
-      'chahiye', 'banado', 'banao', 'bana do', 'bana den', 'bana dein', 'likho', 'likh do',
-      'please', 'ka topic per', 'ka topic pe', 'ka topic par', 'ke topic per', 'ke topic pe',
-      'ke topic par', 'ka topic', 'ke topic', 'topic par', 'topic pe', 'topic per', 'topic',
-      'ke bare mein', 'ke baray mein', 'k baray mein', 'about', 'on the topic of',
-    ];
-
-    for (const phrase of triggerPhrases) {
-      cleaned = cleaned.replace(new RegExp(phrase, 'gi'), ' ');
-    }
-
-    cleaned = cleaned
-      .replace(/\s+/g, ' ')
-      .replace(/^(par|pe|per|ka|ki|ke|on|of|the|a|an)\b\s*/i, '')
-      .replace(/\s*\b(par|pe|per|ka|ki|ke)$/i, '')
-      .replace(/^[\s,.\-:;]+/, '')
-      .replace(/[\s,.\-:;]+$/, '')
-      .trim();
-
-    return cleaned.length >= 2 ? cleaned : text;
-  };
-
-  const handleSendMessage = async (
-    text: string,
-    fileAttachment?: { name: string; size: string; type: string; content?: string },
-    categoryOverride?: ModelCategory
-  ) => {
-    // If the message clearly asks for a presentation, document, or code,
-    // open the matching generator tool automatically alongside the reply.
-    const intent = detectCreationIntent(text);
-    if (intent === 'presentation') {
-      setPendingPresentationTopic(extractTopic(text, intent));
-      setPresentationModalOpen(true);
-    } else if (intent === 'document') {
-      setPendingDocTopic(extractTopic(text, intent));
-      setPdfModalOpen(true);
-    } else if (intent === 'code') {
-      setCodeModalOpen(true);
-    }
-
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      fileAttachment,
-    };
-
-    const currentSessId = activeSession.id;
-    const updatedMessagesWithUser = [...activeMessages, userMsg];
-
-    // Update session state with user message immediately
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === currentSessId
-          ? { ...s, messages: updatedMessagesWithUser, updatedAt: new Date().toISOString() }
-          : s
-      )
-    );
-
-    setIsLoading(true);
-
-    // Trigger title generation if not auto-titled yet or default title
-    const targetSession = sessions.find((s) => s.id === currentSessId);
-    const userMsgCount = updatedMessagesWithUser.filter((m) => m.role === 'user').length;
-
-    if (
-      targetSession &&
-      (!targetSession.isAutoTitled ||
-        targetSession.title === 'New Chat' ||
-        targetSession.title === 'New Conversation' ||
-        userMsgCount === 1)
-    ) {
-      generateTitleForSession(currentSessId, updatedMessagesWithUser);
-    }
-
-    try {
-      const response = await fetch('/api/v1/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          category: categoryOverride || selectedCategory || 'Balanced',
-          strategy: 'auto',
-          fileContext: fileAttachment ? [fileAttachment] : undefined,
-          history: updatedMessagesWithUser.map((m) => ({ role: m.role, text: m.content })),
-          userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (data.noProviderAvailable) {
-          const err: any = new Error(data.error || 'No AI provider is configured.');
-          err.noProviderAvailable = true;
-          throw err;
-        }
-        throw new Error(data.error || 'Failed to communicate with BuildMate AI Router.');
-      }
-
-      const botReply = data.reply || 'Mujhy aap ke request ki samajh agayi hai!';
-
-      const assistantMsg: Message = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: botReply,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        providerUsed: data.providerUsed,
-        modelUsed: data.modelUsed,
-        categoryUsed: data.category,
-        latencyMs: data.latencyMs,
-        tokensUsed: data.tokensUsed,
-        estimatedCostUsd: data.estimatedCostUsd,
-      };
-
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === currentSessId
-            ? { ...s, messages: [...s.messages, assistantMsg], updatedAt: new Date().toISOString() }
-            : s
-        )
-      );
-    } catch (err: any) {
-      console.error(err);
-
-      const isNoProvider = !!err?.noProviderAvailable;
-      const errorMsg: Message = {
-        id: `err-${Date.now()}`,
-        role: 'assistant',
-        content: isNoProvider
-          ? `⚠️ Hamari taraf se shared/default API update nahi ki gayi hai is waqt, is liye ye request process nahi ho saki.\n\nAap apni khud ki API key **bilkul free** mein add kar ke enjoy kar sakte hain — Settings panel apne aap khul raha hai, "API Status" tab mein Google AI Studio (Gemini) aur Groq ke free key links diye gaye hain, chand minutes ka kaam hai.`
-          : `⚠️ Request process nahi ho saki: ${err?.message || 'Unknown error.'}\n\nBraye meherbani dobara koshish karein.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-
-      if (isNoProvider) {
-        setSettingsModalOpen(true);
-      }
-
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === currentSessId
-            ? { ...s, messages: [...s.messages, errorMsg], updatedAt: new Date().toISOString() }
-            : s
-        )
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Quick Action Handler
-  const handleSelectQuickAction = (actionId: string) => {
-    if (actionId === 'pdf') {
-      setPdfModalOpen(true);
-    } else if (actionId === 'presentation') {
-      setPresentationModalOpen(true);
-    } else if (actionId === 'code' || actionId === 'fix') {
-      setCodeModalOpen(true);
-    } else if (actionId === 'summarize') {
-      setSummarizerModalOpen(true);
-    } else if (actionId === 'translate') {
-      handleSendMessage('Please assist me with translating between Roman Urdu and English.');
-    }
-  };
-
-  // Generate PDF Content via API
-  const handleGeneratePDF = async (topic: string, instructions: string): Promise<PDFData | void> => {
-    const res = await fetch('/api/generate-pdf-content', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, instructions, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      if (data.noProviderAvailable) setSettingsModalOpen(true);
-      throw new Error(data.error || 'PDF generate nahi ho saka.');
-    }
-
-    if (data.success && data.pdfData) {
-      const newFile: RecentFile = {
-        id: `rf-${Date.now()}`,
-        name: `${topic}.pdf`,
-        type: 'pdf',
-        date: 'Just now',
-        size: '1.4 MB',
-        pdfData: data.pdfData,
-      };
-      setRecentFiles((prev) => [newFile, ...prev]);
-      return data.pdfData;
-    }
-  };
-
-  // Generate Presentation via API
-  const handleGeneratePresentation = async (topic: string, slideCount: number): Promise<PresentationData | void> => {
-    const res = await fetch('/api/generate-presentation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, slideCount, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      if (data.noProviderAvailable) setSettingsModalOpen(true);
-      throw new Error(data.error || 'Presentation generate nahi ho saki.');
-    }
-
-    if (data.success && data.presentation) {
-      const newFile: RecentFile = {
-        id: `rf-${Date.now()}`,
-        name: `${topic} Presentation.pptx`,
-        type: 'pptx',
-        date: 'Just now',
-        size: '2.8 MB',
-        presentationData: data.presentation,
-      };
-      setRecentFiles((prev) => [newFile, ...prev]);
-      return data.presentation;
-    }
-  };
-
-  // Generate Code via API
-  // Generate a full multi-file project via Custom API
-  const handleGenerateProject = async (topic: string, language: string): Promise<ProjectData | void> => {
-    const res = await fetch('/api/generate-project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, language, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      if (data.noProviderAvailable) setSettingsModalOpen(true);
-      throw new Error(data.error || 'Project generate nahi ho saka.');
-    }
-
-    if (data.success && data.project) {
-      const newFile: RecentFile = {
-        id: `rf-${Date.now()}`,
-        name: `${data.project.projectName || topic}.project`,
-        type: 'code',
-        date: 'Just now',
-        size: `${data.project.files.length} files`,
-        content: JSON.stringify(data.project),
-      };
-      setRecentFiles((prev) => [newFile, ...prev]);
-      return data.project as ProjectData;
-    }
-  };
-
-  const handleGenerateCode = async (prompt: string, language: string) => {
-    const res = await fetch('/api/v1/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: `Write clean production-ready ${language} code for: ${prompt}. Provide code inside markdown backticks and explain how it works.`,
-        category: 'Coding',
-        userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined,
-      }),
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      if (data.noProviderAvailable) {
-        setSettingsModalOpen(true);
-        throw new Error(
-          'Hamari taraf se shared/default API is waqt update nahi ki gayi hai. Apni khud ki API key bilkul free mein add kar ke enjoy karein.'
-        );
-      }
-      throw new Error(data.error || 'Failed to generate code.');
-    }
-
-    const reply = data.reply || '';
-
-    const codeMatch = reply.match(/```(?:\w+)?\n([\s\S]*?)```/);
-    const extractedCode = codeMatch ? codeMatch[1] : reply;
-
-    const newFile: RecentFile = {
-      id: `rf-${Date.now()}`,
-      name: `script.${language === 'python' ? 'py' : language === 'javascript' ? 'js' : 'ts'}`,
-      type: 'code',
-      date: 'Just now',
-      size: '12 KB',
-      content: extractedCode,
-    };
-    setRecentFiles((prev) => [newFile, ...prev]);
-
-    return {
-      code: extractedCode,
-      explanation: 'Code generated successfully via Custom API Router.',
-    };
-  };
-
-  // Summarize Document via API
-  const handleSummarizeDocument = async (textContent: string, filename: string): Promise<SummaryData | void> => {
-    const res = await fetch('/api/summarize-document', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ textContent, filename, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      if (data.noProviderAvailable) setSettingsModalOpen(true);
-      throw new Error(data.error || 'Document summarize nahi ho saka.');
-    }
-
-    if (data.success && data.summary) {
-      return data.summary;
-    }
-  };
-
-  // Select Recent File to view
-  const handleSelectRecentFile = (file: RecentFile) => {
-    if (file.type === 'pdf' && file.pdfData) {
-      setActivePdfData(file.pdfData);
-      setPdfModalOpen(true);
-    } else if (file.type === 'pptx' && file.presentationData) {
-      setActivePresentationData(file.presentationData);
-      setPresentationModalOpen(true);
-    } else if (file.type === 'code') {
-      setActiveCodeData({ code: file.content || '# Python Script', language: 'python' });
-      setCodeModalOpen(true);
-    } else {
-      handleSendMessage(`Can you review the file "${file.name}"?`);
-    }
-  };
-
-  const handleNewChat = () => {
-    const newSessId = `session-${Date.now()}`;
-    const newSess: ChatSession = {
-      id: newSessId,
-      title: 'New Chat',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [
-        {
-          id: `m-${Date.now()}`,
-          role: 'assistant',
-          content: 'Assalam-o-Alaikum Younas! 😊 Naye chat mein aap ka khushamdeed! Aaj kis topic par kaam karna hai?',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ],
-      isAutoTitled: false,
-    };
-
-    setSessions((prev) => [newSess, ...prev]);
-    setActiveSessionId(newSessId);
-    setActiveTab('chat');
-  };
-
-  const handleSelectSession = (sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setActiveTab('chat');
-  };
-
-  const handleDeleteSession = (sessionId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setSessions((prev) => {
-      const filtered = prev.filter((s) => s.id !== sessionId);
-      if (filtered.length === 0) {
-        const fallback: ChatSession = {
-          id: `session-${Date.now()}`,
-          title: 'New Chat',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          messages: [
-            {
-              id: `m-${Date.now()}`,
-              role: 'assistant',
-              content: 'Assalam-o-Alaikum! Naye session mein xushamdeed.',
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            },
-          ],
-          isAutoTitled: false,
-        };
-        setActiveSessionId(fallback.id);
-        return [fallback];
-      }
-      if (activeSessionId === sessionId) {
-        setActiveSessionId(filtered[0].id);
-      }
-      return filtered;
-    });
-  };
-
-  const handleRenameSession = (sessionId: string, newTitle: string) => {
-    if (!newTitle.trim()) return;
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, title: newTitle.trim(), isAutoTitled: true } : s))
-    );
-  };
-
-  const handleOpenDirectChat = () => {
-    setActiveTab('chat');
   };
 
   return (
-    <div className={`min-h-screen font-sans ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'} flex flex-col antialiased selection:bg-indigo-500 selection:text-white`}>
-      {/* Top Bar Header */}
-      <TopHeader
-        selectedModel={selectedModel}
-        models={AI_MODELS}
-        onSelectModel={setSelectedModel}
-        user={user}
-        darkMode={darkMode}
-        onToggleTheme={() => setDarkMode(!darkMode)}
-        onOpenSettings={() => setSettingsModalOpen(true)}
-        onOpenDocs={() => handleSendMessage('Explain all features of BuildMate AI in Roman Urdu and English.')}
-        onOpenAdmin={() => setAdminDashboardModalOpen(true)}
-        onOpenWelcomeNote={() => setWelcomeNoteModalOpen(true)}
-        onToggleMobileLeftSidebar={() => setIsMobileLeftSidebarOpen(!isMobileLeftSidebarOpen)}
-        onToggleMobileRightSidebar={() => setIsMobileRightSidebarOpen(!isMobileRightSidebarOpen)}
-      />
+    <div onClick={handleSkip} title={isTyping ? "Click to reveal full text" : undefined} className={isTyping ? "cursor-pointer" : ""}>
+      <span className="whitespace-pre-wrap leading-relaxed font-sans text-xs">
+        {displayedText}
+      </span>
+      {isTyping && (
+        <span className="inline-block w-1.5 h-3.5 ml-1 bg-indigo-400 animate-pulse align-middle rounded-sm" />
+      )}
+    </div>
+  );
+};
 
-      {/* Main Workspace Layout (Fluid Responsive Grid) */}
-      <div className="flex-1 flex overflow-hidden max-w-[1920px] w-full mx-auto relative pb-16 lg:pb-0">
-        {/* Left Sidebar (Desktop + Mobile Drawer) */}
-        <LeftSidebar
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          onNewChat={handleNewChat}
-          onOpenSettings={() => setSettingsModalOpen(true)}
-          onOpenAccount={() => setSettingsModalOpen(true)}
-          onOpenAdmin={() => setAdminDashboardModalOpen(true)}
-          isMobileOpen={isMobileLeftSidebarOpen}
-          onCloseMobile={() => setIsMobileLeftSidebarOpen(false)}
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onSelectSession={handleSelectSession}
-        />
+interface ChatSectionProps {
+  messages: Message[];
+  onSendMessage: (
+    text: string,
+    file?: { name: string; size: string; type: string; content?: string },
+    category?: ModelCategory
+  ) => void;
+  isLoading: boolean;
+  user: UserProfile;
+  onTriggerAction: (actionType: 'pdf' | 'presentation' | 'code' | 'summarize') => void;
+  onViewStructuredData: (msg: Message) => void;
+  selectedCategory: ModelCategory;
+  onSelectCategory: (cat: ModelCategory) => void;
+  sessionTitle?: string;
+  onRenameSessionTitle?: (newTitle: string) => void;
+}
 
-        {/* Center Canvas View Area */}
-        <main className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 flex flex-col justify-between max-w-7xl mx-auto w-full">
-          <div className="flex-1 flex flex-col min-h-0">
-            {/* 1. DEDICATED FULL CHAT PAGE VIEW */}
-            {activeTab === 'chat' && (
-              <div className="flex-1 flex flex-col h-full animate-in fade-in duration-200">
-                <div className="mb-2 flex items-center justify-between bg-slate-900/80 p-2.5 px-4 rounded-2xl border border-indigo-900/40 shadow-md">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
-                      <Sparkles className="w-4 h-4 text-amber-300" />
-                    </div>
-                    <div>
-                      <h2 className="text-xs sm:text-sm font-extrabold text-white tracking-tight leading-none truncate max-w-[200px] sm:max-w-xs">
-                        {activeSession.title}
-                      </h2>
-                      <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                        Auto-titled session ({activeMessages.length} messages)
-                      </p>
-                    </div>
-                  </div>
+export const ChatSection: React.FC<ChatSectionProps> = ({
+  messages,
+  onSendMessage,
+  isLoading,
+  user,
+  onTriggerAction,
+  onViewStructuredData,
+  selectedCategory,
+  onSelectCategory,
+  sessionTitle,
+  onRenameSessionTitle,
+}) => {
+  const [inputPrompt, setInputPrompt] = useState('');
+  const [attachedFile, setAttachedFile] = useState<{ name: string; size: string; type: string; content?: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingLanguage, setRecordingLanguage] = useState<'ur-PK' | 'en-US'>('ur-PK');
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isLiveCallOpen, setIsLiveCallOpen] = useState(false);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleNewChat}
-                      className="text-xs text-emerald-300 hover:text-white bg-emerald-950/60 border border-emerald-800/50 px-2.5 py-1.5 rounded-xl transition-all hover:bg-emerald-900 flex items-center gap-1 font-medium"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>New Chat</span>
-                    </button>
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
 
-                    <button
-                      onClick={() => setActiveTab('dashboard')}
-                      className="text-xs text-indigo-300 hover:text-white bg-slate-950/80 border border-indigo-800/40 px-3 py-1.5 rounded-xl transition-all hover:bg-indigo-950 flex items-center gap-1.5 font-medium"
-                    >
-                      <span>← Dashboard</span>
-                    </button>
-                  </div>
-                </div>
+  const handleSpeakMessage = (msgId: string, text: string) => {
+    if (!('speechSynthesis' in window)) return;
 
-                {/* Dedicated Full Height Chat Section */}
-                <ChatSection
-                  messages={activeMessages}
-                  onSendMessage={handleSendMessage}
-                  isLoading={isLoading}
-                  user={user}
-                  onTriggerAction={handleSelectQuickAction}
-                  onViewStructuredData={(msg) => {
-                    if (msg.actionType === 'pdf') setPdfModalOpen(true);
-                    if (msg.actionType === 'presentation') setPresentationModalOpen(true);
-                  }}
-                  selectedCategory={selectedCategory}
-                  onSelectCategory={setSelectedCategory}
-                  sessionTitle={activeSession.title}
-                  onRenameSessionTitle={(title) => handleRenameSession(activeSession.id, title)}
-                />
-              </div>
-            )}
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
 
-            {/* 2. DASHBOARD HOME VIEW */}
-            {activeTab === 'dashboard' && (
-              <div className="space-y-4 animate-in fade-in duration-200">
-                {/* Hero Greeting Banner */}
-                <HeroBanner user={user} onOpenDirectChat={() => setActiveTab('chat')} />
+    window.speechSynthesis.cancel();
+    const clean = text.replace(/```[\s\S]*?```/g, ' Code snippet omitted on voice speech. ').replace(/[*#_`]/g, '');
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = recordingLanguage;
 
-                {/* Big Prominent Direct Chat Launch Button */}
-                <div className="my-3">
-                  <button
-                    onClick={() => setActiveTab('chat')}
-                    className="w-full py-3.5 px-5 sm:px-6 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 text-white font-extrabold text-sm sm:text-base flex items-center justify-between shadow-xl shadow-indigo-600/30 border border-indigo-400/40 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center flex-shrink-0 shadow-inner">
-                        <MessageSquare className="w-5 h-5 text-amber-300 animate-bounce" />
-                      </div>
-                      <div className="text-left">
-                        <div className="font-extrabold text-white text-sm sm:text-base leading-tight flex items-center gap-2">
-                          <span>💬 Dedicated Chat Page Open Karein</span>
-                          <span className="hidden sm:inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 uppercase tracking-wider font-bold">
-                            Separate Page
-                          </span>
-                        </div>
-                        <div className="text-[11px] sm:text-xs text-indigo-100 font-medium mt-0.5">
-                          Bina scroll kiye naye chat screen par jaane ke liye click karein
-                        </div>
-                      </div>
-                    </div>
+    utterance.onend = () => setSpeakingMsgId(null);
+    utterance.onerror = () => setSpeakingMsgId(null);
 
-                    <div className="flex items-center gap-1.5 bg-slate-950/40 px-3 py-2 rounded-xl border border-white/20 group-hover:bg-slate-950/70 transition-colors flex-shrink-0 ml-2">
-                      <span className="text-xs font-extrabold text-amber-300">Open Chat View →</span>
-                    </div>
-                  </button>
-                </div>
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
 
-                {/* 6 Quick Action Grid Cards */}
-                <QuickActionsGrid
-                  actions={QUICK_ACTIONS}
-                  onSelectAction={handleSelectQuickAction}
-                />
-              </div>
-            )}
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
-            {/* 3. HISTORY TAB */}
-            {activeTab === 'history' && (
-              <div className="p-4 sm:p-6 bg-slate-900/70 rounded-2xl border border-indigo-900/40 space-y-4 animate-in fade-in duration-200">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-                  <div>
-                    <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                      <History className="w-5 h-5 text-indigo-400" />
-                      <span>Chat Session History</span>
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Auto-generated descriptive session titles based on conversation topics.
-                    </p>
-                  </div>
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {
+          // ignore cleanup error
+        }
+      }
+    };
+  }, []);
 
-                  <button
-                    onClick={handleNewChat}
-                    className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 self-start sm:self-auto"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>New Chat Session</span>
-                  </button>
-                </div>
+  const handleSend = () => {
+    if ((!inputPrompt.trim() && !attachedFile) || isLoading) return;
 
-                {/* Search Bar */}
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+    // Check for slash commands
+    const trimmed = inputPrompt.trim();
+    if (trimmed.startsWith('/pdf')) {
+      const topic = trimmed.replace('/pdf', '').trim() || 'Software Architecture Overview';
+      onSendMessage(`Create a PDF report on topic: ${topic}`, attachedFile || undefined, selectedCategory);
+    } else if (trimmed.startsWith('/ppt')) {
+      const topic = trimmed.replace('/ppt', '').trim() || 'Artificial Intelligence Trends';
+      onSendMessage(`Create a presentation slide deck on: ${topic}`, attachedFile || undefined, selectedCategory);
+    } else if (trimmed.startsWith('/code')) {
+      const codeReq = trimmed.replace('/code', '').trim() || 'Write a Python script for data processing';
+      onSendMessage(`Generate code for: ${codeReq}`, attachedFile || undefined, 'Coding');
+    } else if (trimmed.startsWith('/summarize')) {
+      onSendMessage(`Summarize the attached document or following topic: ${trimmed.replace('/summarize', '').trim()}`, attachedFile || undefined, selectedCategory);
+    } else if (trimmed.startsWith('/help')) {
+      onSendMessage('Show all available slash commands and shortcuts in Roman Urdu & English.', undefined, selectedCategory);
+    } else {
+      onSendMessage(inputPrompt, attachedFile || undefined, selectedCategory);
+    }
+
+    setInputPrompt('');
+    setAttachedFile(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const textContent = evt.target?.result as string;
+        setAttachedFile({
+          name: file.name,
+          size: `${(file.size / 1024).toFixed(1)} KB`,
+          type: file.type || 'document',
+          content: textContent || '',
+        });
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const toggleRecording = () => {
+    setSpeechError(null);
+
+    if (isRecording && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.error(e);
+      }
+      setIsRecording(false);
+      return;
+    }
+
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      setSpeechError('Speech recognition is not supported in this browser window.');
+      return;
+    }
+
+    try {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = recordingLanguage;
+
+      let finalTranscript = '';
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript + ' ';
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+        const combined = (finalTranscript + interimTranscript).trim();
+        if (combined) {
+          setInputPrompt(() => combined);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error !== 'no-speech') {
+          setSpeechError(`Voice input error: ${event.error}`);
+        }
+        setIsRecording(false);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognition.start();
+    } catch (err: any) {
+      console.error(err);
+      setSpeechError('Could not access microphone for voice input.');
+      setIsRecording(false);
+    }
+  };
+
+  const handleCopyCode = (code: string, id: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const categories: { id: ModelCategory; label: string; icon: string }[] = [
+    { id: 'Fast', label: '⚡ Fast', icon: 'zap' },
+    { id: 'Balanced', label: '⚖️ Balanced', icon: 'scale' },
+    { id: 'Premium', label: '🌟 Premium', icon: 'star' },
+    { id: 'Reasoning', label: '🧠 Reasoning', icon: 'brain' },
+    { id: 'Coding', label: '💻 Coding', icon: 'code' },
+    { id: 'Vision', label: '👁️ Vision', icon: 'eye' },
+  ];
+
+  return (
+    <div id="chat-section" className="flex flex-col h-full bg-slate-950/60 rounded-2xl border border-indigo-900/40 overflow-hidden shadow-2xl my-2 scroll-mt-6">
+      {/* Header Bar for Chat */}
+      <div className="px-4 py-2.5 bg-slate-900/90 border-b border-indigo-900/30 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 max-w-full overflow-hidden">
+          <MessageSquare className="w-4 h-4 text-purple-400 shrink-0" />
+          
+          {sessionTitle && (
+            <div className="flex items-center gap-1.5 truncate">
+              {isEditingTitle ? (
+                <div className="flex items-center gap-1">
                   <input
                     type="text"
-                    value={historySearchQuery}
-                    onChange={(e) => setHistorySearchQuery(e.target.value)}
-                    placeholder="Search history sessions by title or message content..."
-                    className="w-full bg-slate-950 border border-indigo-900/50 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                    value={titleInput}
+                    onChange={(e) => setTitleInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && titleInput.trim()) {
+                        onRenameSessionTitle?.(titleInput.trim());
+                        setIsEditingTitle(false);
+                      } else if (e.key === 'Escape') {
+                        setIsEditingTitle(false);
+                      }
+                    }}
+                    autoFocus
+                    className="bg-slate-950 text-white text-xs px-2 py-0.5 rounded border border-indigo-500 focus:outline-none"
                   />
-                  {historySearchQuery && (
-                    <button
-                      onClick={() => setHistorySearchQuery('')}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      if (titleInput.trim()) {
+                        onRenameSessionTitle?.(titleInput.trim());
+                      }
+                      setIsEditingTitle(false);
+                    }}
+                    className="p-1 hover:text-emerald-400 text-slate-300"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-
-                {/* Session List */}
-                <div className="space-y-2.5 pt-1">
-                  {sessions
-                    .filter((s) => {
-                      if (!historySearchQuery.trim()) return true;
-                      const q = historySearchQuery.toLowerCase();
-                      const matchesTitle = s.title.toLowerCase().includes(q);
-                      const matchesMessage = s.messages.some((m) => m.content.toLowerCase().includes(q));
-                      return matchesTitle || matchesMessage;
-                    })
-                    .map((sess) => {
-                      const isCurrent = sess.id === activeSessionId;
-                      const firstUserMsg = sess.messages.find((m) => m.role === 'user')?.content;
-                      const lastMsg = sess.messages[sess.messages.length - 1]?.content;
-
-                      return (
-                        <div
-                          key={sess.id}
-                          className={`p-3.5 sm:p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                            isCurrent
-                              ? 'bg-indigo-950/40 border-indigo-500/60 shadow-lg shadow-indigo-950/50'
-                              : 'bg-slate-950/80 border-slate-800/80 hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="space-y-1 min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <MessageSquare className="w-4 h-4 text-indigo-400 shrink-0" />
-                              <h4 className="text-xs sm:text-sm font-bold text-white truncate max-w-md">
-                                {sess.title}
-                              </h4>
-                              {isCurrent && (
-                                <span className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold uppercase">
-                                  Active Session
-                                </span>
-                              )}
-                              {sess.isAutoTitled && (
-                                <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/20 font-medium">
-                                  Auto-Titled AI
-                                </span>
-                              )}
-                            </div>
-
-                            <p className="text-[11px] text-slate-400 line-clamp-1 italic">
-                              "{firstUserMsg || lastMsg || 'No user messages yet'}"
-                            </p>
-
-                            <div className="flex items-center gap-3 text-[10px] text-slate-500 font-medium pt-0.5">
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-3 h-3 text-slate-500" />
-                                {new Date(sess.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                              <span>•</span>
-                              <span>{sess.messages.length} messages</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-900 w-full sm:w-auto justify-end">
-                            <button
-                              onClick={() => handleSelectSession(sess.id)}
-                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors shadow-sm"
-                            >
-                              Resume Chat
-                            </button>
-
-                            <button
-                              onClick={(e) => handleDeleteSession(sess.id, e)}
-                              className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-900 rounded-lg transition-colors"
-                              title="Delete Session"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                  {sessions.length === 0 && (
-                    <div className="text-center py-8 text-slate-500 text-xs">
-                      No chat session history found. Start a new chat!
-                    </div>
-                  )}
+              ) : (
+                <div className="flex items-center gap-1.5 group cursor-pointer" onClick={() => { setTitleInput(sessionTitle); setIsEditingTitle(true); }}>
+                  <span className="text-xs font-bold text-white truncate max-w-[220px] sm:max-w-[320px]" title={sessionTitle}>
+                    {sessionTitle}
+                  </span>
+                  <Edit2 className="w-3 h-3 text-slate-500 group-hover:text-indigo-300 transition-colors shrink-0 opacity-0 group-hover:opacity-100" />
                 </div>
+              )}
+            </div>
+          )}
+
+          {!sessionTitle && (
+            <span className="text-xs font-bold text-slate-200">Chat Session</span>
+          )}
+
+          <button
+            onClick={() => setIsLiveCallOpen(true)}
+            className="ml-2 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white text-[11px] font-extrabold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 border border-emerald-400/40 animate-pulse cursor-pointer shrink-0"
+            title="Launch Gemini & ChatGPT Style Live Voice Call"
+          >
+            <PhoneCall className="w-3.5 h-3.5 text-amber-300" />
+            <span>Live Voice Call</span>
+          </button>
+        </div>
+
+        {/* Category Dock */}
+        <div className="flex items-center gap-1 overflow-x-auto py-0.5">
+          <span className="text-[10px] text-slate-500 uppercase font-bold mr-1">Category:</span>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => onSelectCategory(c.id)}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                selectedCategory === c.id
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Messages Scroll Area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-[380px] h-[calc(100vh-230px)] scrollbar-thin scrollbar-thumb-indigo-900 scrollbar-track-slate-950">
+        {messages.map((msg, idx) => (
+          <div
+            key={msg.id}
+            className={`flex gap-3 text-xs ${
+              msg.role === 'user' ? 'justify-end' : 'justify-start'
+            }`}
+          >
+            {msg.role === 'assistant' && (
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-indigo-600/30">
+                <Bot className="w-4 h-4" />
               </div>
             )}
 
-            {/* 4. FILES TAB */}
-            {activeTab === 'files' && (
-              <div className="p-6 bg-slate-900/60 rounded-2xl border border-indigo-900/40 space-y-4 animate-in fade-in duration-200">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Folder className="w-5 h-5 text-indigo-400" />
-                  <span>Files & Generated Artifacts</span>
-                </h2>
-                <p className="text-xs text-slate-400">
-                  All created documents, PDFs, slide decks, and code files.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {recentFiles.map((f) => (
-                    <div
-                      key={f.id}
-                      onClick={() => handleSelectRecentFile(f)}
-                      className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between cursor-pointer hover:border-indigo-500/50 transition-colors"
-                    >
-                      <span className="text-xs font-semibold text-slate-200">{f.name}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 font-mono">
-                        {f.type.toUpperCase()}
-                      </span>
-                    </div>
-                  ))}
+            <div
+              className={`max-w-[80%] rounded-2xl p-3.5 shadow-md ${
+                msg.role === 'user'
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-br-none'
+                  : 'bg-slate-900/90 border border-indigo-900/50 text-slate-200 rounded-bl-none'
+              }`}
+            >
+              {/* Provider & Router Metadata Badge for assistant messages */}
+              {msg.role === 'assistant' && (msg.providerUsed || msg.modelUsed) && (
+                <div className="mb-2 pb-1.5 border-b border-indigo-900/40 flex items-center justify-between text-[10px] text-indigo-300 font-mono">
+                  <div className="flex items-center gap-1.5">
+                    <Cpu className="w-3 h-3 text-indigo-400" />
+                    <span className="uppercase font-bold">{msg.providerUsed || 'Gemini'}</span>
+                    <span className="text-slate-400">({msg.modelUsed || '3.6 Flash'})</span>
+                  </div>
+                  {msg.latencyMs && (
+                    <span className="text-amber-400 font-medium">{msg.latencyMs}ms</span>
+                  )}
                 </div>
+              )}
+
+              {/* Attachment tag if user attached file */}
+              {msg.fileAttachment && (
+                <div className="mb-2 p-2 rounded-lg bg-slate-950/60 border border-indigo-500/30 flex items-center gap-2 text-[11px] text-indigo-300">
+                  <Paperclip className="w-3.5 h-3.5" />
+                  <span className="font-medium">{msg.fileAttachment.name}</span>
+                  <span className="text-[9px] text-slate-400">({msg.fileAttachment.size})</span>
+                </div>
+              )}
+
+              {/* Text Body with Streaming Typing Effect */}
+              {msg.role === 'assistant' ? (
+                <TypewriterText
+                  content={msg.content}
+                  isLatest={idx === messages.length - 1}
+                  onTextUpdate={() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                />
+              ) : (
+                <div className="whitespace-pre-wrap leading-relaxed font-sans text-xs">
+                  {msg.content}
+                </div>
+              )}
+
+              {/* View Generated Artifact Trigger if available */}
+              {msg.structuredData && (
+                <div className="mt-3 pt-2 border-t border-indigo-800/40 flex items-center justify-between">
+                  <span className="text-[10px] text-indigo-300 font-semibold">
+                    {msg.actionType === 'pdf' ? '📄 PDF Report Generated' : msg.actionType === 'presentation' ? '📊 Presentation Slides Generated' : '📄 Document Processed'}
+                  </span>
+                  <button
+                    onClick={() => onViewStructuredData(msg)}
+                    className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold transition-all flex items-center gap-1 shadow"
+                  >
+                    <span>View Interactive Artifact</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Timestamp, Speech Playback & Copy */}
+              <div className="mt-2 flex items-center justify-between text-[10px] opacity-75 pt-1">
+                <span>{msg.timestamp}</span>
+                {msg.role === 'assistant' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleSpeakMessage(msg.id, msg.content)}
+                      className="hover:text-indigo-300 transition-colors p-0.5 flex items-center gap-1"
+                      title={speakingMsgId === msg.id ? "Stop voice audio" : "Listen response aloud (Urdu/English)"}
+                    >
+                      {speakingMsgId === msg.id ? (
+                        <VolumeX className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5 hover:text-indigo-300" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => handleCopyCode(msg.content, msg.id)}
+                      className="hover:text-indigo-300 transition-colors p-0.5"
+                      title="Copy response"
+                    >
+                      {copiedId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {msg.role === 'user' && (
+              <div className="w-8 h-8 rounded-xl bg-indigo-700 text-white font-bold flex items-center justify-center flex-shrink-0 text-xs shadow-md">
+                {user.avatarText}
               </div>
             )}
           </div>
+        ))}
 
-          {/* Bottom Bar Footer */}
-          <footer className="pt-3 pb-2 border-t border-indigo-900/30 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 font-medium gap-2">
-            <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-              <span>Proxy Active & Secure</span>
-              <span className="text-slate-700 hidden sm:inline">|</span>
-              <span>BuildMate AI - OpenRouter / LiteLLM Engine</span>
+        {isLoading && (
+          <div className="flex gap-3 items-center text-xs text-indigo-300 animate-pulse">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-indigo-400 animate-spin" />
             </div>
-
-            <div className="flex items-center gap-4 text-[10px] sm:text-[11px]">
-              <a href="#privacy" className="hover:text-indigo-400 transition-colors">Privacy</a>
-              <a href="#terms" className="hover:text-indigo-400 transition-colors">Terms</a>
-              <a href="#support" className="hover:text-indigo-400 transition-colors">Support</a>
-              <span className="text-slate-700">© 2026 Younas Mengal</span>
+            <div className="px-4 py-2.5 rounded-2xl bg-slate-900 border border-indigo-900/50 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span>
+              <span>Intelligent Router routing to best available AI Provider for category '{selectedCategory}'...</span>
             </div>
-          </footer>
-        </main>
+          </div>
+        )}
 
-        {/* Right Sidebar (Desktop + Mobile Drawer) */}
-        <RightSidebar
-          model={selectedModel}
-          recentFiles={recentFiles}
-          shortcuts={COMMAND_SHORTCUTS}
-          onChangeModelClick={() => setSettingsModalOpen(true)}
-          onSelectRecentFile={handleSelectRecentFile}
-          isMobileOpen={isMobileRightSidebarOpen}
-          onCloseMobile={() => setIsMobileRightSidebarOpen(false)}
-        />
+        <div ref={chatBottomRef} />
       </div>
 
-      {/* Touch-Friendly Mobile Quick Bottom Navigation Dock */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 border-t border-indigo-900/50 backdrop-blur-md px-3 py-1.5 flex items-center justify-around lg:hidden">
-        <button
-          onClick={() => {
-            setActiveTab('chat');
-            setIsMobileLeftSidebarOpen(false);
-            setIsMobileRightSidebarOpen(false);
-          }}
-          className={`flex flex-col items-center gap-0.5 p-1 rounded-lg text-[10px] font-medium transition-colors ${
-            activeTab === 'chat' ? 'text-indigo-400' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>Chat</span>
-        </button>
+      {/* Input Dock */}
+      <div className="p-3 bg-slate-900/90 border-t border-indigo-900/40">
+        {/* Active Speech Recording Banner */}
+        {isRecording && (
+          <div className="mb-2 px-3 py-1.5 rounded-lg bg-rose-950/80 border border-rose-500/50 flex items-center justify-between text-xs text-rose-200 animate-pulse">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+              <span className="font-semibold">Listening... speak in {recordingLanguage === 'ur-PK' ? 'Roman Urdu / Urdu' : 'English'}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setRecordingLanguage(recordingLanguage === 'ur-PK' ? 'en-US' : 'ur-PK')}
+                className="text-[10px] px-2 py-0.5 rounded bg-rose-900/60 border border-rose-500/40 hover:bg-rose-800 text-white font-mono"
+              >
+                Lang: {recordingLanguage === 'ur-PK' ? 'Urdu' : 'English'}
+              </button>
+              <button onClick={toggleRecording} className="p-0.5 hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
 
-        <button
-          onClick={handleNewChat}
-          className="flex flex-col items-center gap-0.5 p-1 rounded-lg text-[10px] font-medium text-slate-400 hover:text-slate-200 transition-colors"
-        >
-          <Plus className="w-4 h-4 text-emerald-400" />
-          <span>New Chat</span>
-        </button>
+        {/* Speech Error Banner */}
+        {speechError && (
+          <div className="mb-2 px-3 py-1.5 rounded-lg bg-amber-950/80 border border-amber-500/40 flex items-center justify-between text-xs text-amber-200">
+            <span>{speechError}</span>
+            <button onClick={() => setSpeechError(null)} className="p-0.5 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
-        <button
-          onClick={() => setAdminDashboardModalOpen(true)}
-          className="flex flex-col items-center gap-0.5 p-1 rounded-lg text-[10px] font-medium text-slate-400 hover:text-slate-200 transition-colors"
-        >
-          <Activity className="w-4 h-4 text-amber-400" />
-          <span>Admin</span>
-        </button>
+        {/* Attached file chip */}
+        {attachedFile && (
+          <div className="mb-2 px-3 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-600/40 flex items-center justify-between text-xs text-indigo-200">
+            <div className="flex items-center gap-2">
+              <Paperclip className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="font-medium">{attachedFile.name}</span>
+              <span className="text-[10px] text-slate-400">({attachedFile.size})</span>
+            </div>
+            <button
+              onClick={() => setAttachedFile(null)}
+              className="p-1 hover:text-rose-400 text-slate-400"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
-        <button
-          onClick={() => setIsMobileRightSidebarOpen(!isMobileRightSidebarOpen)}
-          className="flex flex-col items-center gap-0.5 p-1 rounded-lg text-[10px] font-medium text-slate-400 hover:text-slate-200 transition-colors"
-        >
-          <Folder className="w-4 h-4 text-sky-400" />
-          <span>Files</span>
-        </button>
-      </nav>
+        {/* Input Box */}
+        <div className="relative rounded-xl bg-slate-950 border border-indigo-900/60 focus-within:border-indigo-500/80 transition-all p-2">
+          <textarea
+            value={inputPrompt}
+            onChange={(e) => setInputPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask me anything... (Speak using mic or type in Roman Urdu / English)"
+            rows={2}
+            className="w-full bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none resize-none px-2 py-1 font-sans"
+          />
 
-      {/* Feature Modals */}
-      <WelcomeNoteModal
-        isOpen={welcomeNoteModalOpen}
-        onClose={() => setWelcomeNoteModalOpen(false)}
-      />
+              {/* Action Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-900/80">
+            {/* Slash Command Helper Quick Chips - Touch-friendly scroll row */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none text-[10px]">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                className="hidden"
+                accept=".txt,.pdf,.docx,.py,.js,.ts,.json,.md,.cpp"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-[11px] font-medium border border-slate-800 transition-colors flex-shrink-0 min-h-[36px]"
+                title="Upload file or document"
+              >
+                <Paperclip className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden min-[400px]:inline">Upload</span>
+              </button>
 
-      <PDFGeneratorModal
-        isOpen={pdfModalOpen}
-        onClose={() => setPdfModalOpen(false)}
-        initialData={activePdfData}
-        initialTopic={pendingDocTopic}
-        onGeneratePDF={handleGeneratePDF}
-      />
+              <button
+                onClick={() => onTriggerAction('pdf')}
+                className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 border border-rose-500/30 font-mono font-bold flex-shrink-0 min-h-[36px] flex items-center"
+              >
+                /pdf
+              </button>
+              <button
+                onClick={() => onTriggerAction('presentation')}
+                className="px-2.5 py-1.5 rounded-lg bg-orange-500/10 text-orange-300 hover:bg-orange-500/20 border border-orange-500/30 font-mono font-bold flex-shrink-0 min-h-[36px] flex items-center"
+              >
+                /ppt
+              </button>
+              <button
+                onClick={() => onTriggerAction('code')}
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/30 font-mono font-bold flex-shrink-0 min-h-[36px] flex items-center"
+              >
+                /code
+              </button>
+              <button
+                onClick={() => onTriggerAction('summarize')}
+                className="px-2.5 py-1.5 rounded-lg bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 border border-sky-500/30 font-mono font-bold flex-shrink-0 min-h-[36px] flex items-center"
+              >
+                /summarize
+              </button>
+            </div>
 
-      <PresentationModal
-        isOpen={presentationModalOpen}
-        onClose={() => setPresentationModalOpen(false)}
-        initialData={activePresentationData}
-        initialTopic={pendingPresentationTopic}
-        onGeneratePresentation={handleGeneratePresentation}
-      />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setRecordingLanguage(recordingLanguage === 'ur-PK' ? 'en-US' : 'ur-PK')}
+                className="px-2 py-1 text-[10px] font-mono rounded-lg bg-slate-900 text-slate-300 border border-slate-800 hover:text-white min-h-[36px] flex items-center"
+                title="Toggle Voice Recognition Language"
+              >
+                {recordingLanguage === 'ur-PK' ? '🎤 Urdu' : '🎤 EN'}
+              </button>
 
-      <CodeEditorModal
-        isOpen={codeModalOpen}
-        onClose={() => setCodeModalOpen(false)}
-        initialCode={activeCodeData?.code}
-        initialLanguage={activeCodeData?.language}
-        onGenerateCode={handleGenerateCode}
-        onGenerateProject={handleGenerateProject}
-      />
+              <button
+                onClick={() => setIsLiveCallOpen(true)}
+                className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-md shadow-emerald-600/30 transition-all cursor-pointer min-h-[36px]"
+                title="Start Live Voice Call (Gemini / ChatGPT style)"
+              >
+                <PhoneCall className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline">Live Call</span>
+              </button>
 
-      <SummarizerModal
-        isOpen={summarizerModalOpen}
-        onClose={() => setSummarizerModalOpen(false)}
-        initialSummary={activeSummaryData}
-        onSummarizeDocument={handleSummarizeDocument}
-      />
+              <button
+                onClick={toggleRecording}
+                className={`p-2 rounded-lg text-xs transition-all flex items-center justify-center min-w-[40px] min-h-[36px] ${
+                  isRecording
+                    ? 'bg-rose-600 text-white animate-bounce ring-2 ring-rose-400/50'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                }`}
+                title="Voice input (Web Speech API)"
+              >
+                {isRecording ? <MicOff className="w-4 h-4 text-white" /> : <Mic className="w-4 h-4" />}
+              </button>
 
-      <SettingsModal
-        isOpen={settingsModalOpen}
-        onClose={() => setSettingsModalOpen(false)}
+              <button
+                onClick={handleSend}
+                disabled={(!inputPrompt.trim() && !attachedFile) || isLoading}
+                className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer min-h-[36px]"
+              >
+                <span>Send</span>
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-[10px] text-center text-slate-500 mt-2">
+          BuildMate Custom API Proxy & Smart Router • Roman Urdu & English Supported
+        </p>
+      </div>
+
+      {/* Gemini & ChatGPT Style Live Voice Call Modal */}
+      <LiveVoiceCallModal
+        isOpen={isLiveCallOpen}
+        onClose={() => setIsLiveCallOpen(false)}
+        messages={messages}
+        onSendMessage={onSendMessage}
+        isLoading={isLoading}
         user={user}
-        models={AI_MODELS}
-        selectedModel={selectedModel}
-        onSelectModel={setSelectedModel}
-        darkMode={darkMode}
-        onToggleTheme={() => setDarkMode(!darkMode)}
-        userKeys={userKeys}
-        onUpdateUserKeys={setUserKeys}
-      />
-
-      <AdminDashboardModal
-        isOpen={adminDashboardModalOpen}
-        onClose={() => setAdminDashboardModalOpen(false)}
+        selectedCategory={selectedCategory}
       />
     </div>
   );
-}
-
+};
