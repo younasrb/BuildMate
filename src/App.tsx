@@ -47,7 +47,7 @@ export default function App() {
   // these are sent to the backend so the Smart Router prefers the user's own
   // key first before falling back to the shared server key - this avoids
   // hitting shared rate limits. Fully optional; app works with zero setup.
-  const [userKeys, setUserKeys] = useState<Record<string, string>>(() => {
+  const [userKeys, setUserKeys] = useState<Record<string, any>>(() => {
     try {
       const saved = localStorage.getItem('buildmate_user_keys');
       if (saved) return JSON.parse(saved);
@@ -347,7 +347,7 @@ export default function App() {
         id: `err-${Date.now()}`,
         role: 'assistant',
         content: isNoProvider
-          ? `⚠️ Koi bhi AI provider configured nahi hai ya sab providers fail ho gaye hain: "${err.message}"\n\nBraye meherbani Settings kholkar apni Custom API key add karein — Settings panel apne aap khul raha hai. Free API key Google AI Studio (Gemini) ya Groq se chand minutes mein mil jati hai — "API Status" tab mein links diye gaye hain.`
+          ? `⚠️ Hamari taraf se shared/default API update nahi ki gayi hai is waqt, is liye ye request process nahi ho saki.\n\nAap apni khud ki API key **bilkul free** mein add kar ke enjoy kar sakte hain — Settings panel apne aap khul raha hai, "API Status" tab mein Google AI Studio (Gemini) aur Groq ke free key links diye gaye hain, chand minutes ka kaam hai.`
           : `⚠️ Request process nahi ho saki: ${err?.message || 'Unknown error.'}\n\nBraye meherbani dobara koshish karein.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
@@ -388,7 +388,7 @@ export default function App() {
     const res = await fetch('/api/generate-pdf-content', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, instructions }),
+      body: JSON.stringify({ topic, instructions, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
     });
     const data = await res.json();
 
@@ -416,7 +416,7 @@ export default function App() {
     const res = await fetch('/api/generate-presentation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, slideCount }),
+      body: JSON.stringify({ topic, slideCount, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
     });
     const data = await res.json();
 
@@ -445,7 +445,7 @@ export default function App() {
     const res = await fetch('/api/generate-project', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic, language }),
+      body: JSON.stringify({ topic, language, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
     });
     const data = await res.json();
 
@@ -475,6 +475,7 @@ export default function App() {
       body: JSON.stringify({
         message: `Write clean production-ready ${language} code for: ${prompt}. Provide code inside markdown backticks and explain how it works.`,
         category: 'Coding',
+        userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined,
       }),
     });
     const data = await res.json();
@@ -482,6 +483,9 @@ export default function App() {
     if (!res.ok) {
       if (data.noProviderAvailable) {
         setSettingsModalOpen(true);
+        throw new Error(
+          'Hamari taraf se shared/default API is waqt update nahi ki gayi hai. Apni khud ki API key bilkul free mein add kar ke enjoy karein.'
+        );
       }
       throw new Error(data.error || 'Failed to generate code.');
     }
@@ -512,7 +516,7 @@ export default function App() {
     const res = await fetch('/api/summarize-document', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ textContent, filename }),
+      body: JSON.stringify({ textContent, filename, userKeys: Object.keys(userKeys).length > 0 ? userKeys : undefined }),
     });
     const data = await res.json();
 

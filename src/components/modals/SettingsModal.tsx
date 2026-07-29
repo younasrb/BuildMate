@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserProfile, AIModelOption } from '../../types';
-import { X, Key, User, ShieldCheck, Sparkles, Check, Cpu, Zap, Save } from 'lucide-react';
+import { X, Key, User, ShieldCheck, Sparkles, Check, Cpu, Zap, Save, Plus, Trash2 } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -11,8 +11,16 @@ interface SettingsModalProps {
   onSelectModel: (m: AIModelOption) => void;
   darkMode: boolean;
   onToggleTheme: () => void;
-  userKeys?: Record<string, string>;
-  onUpdateUserKeys?: (keys: Record<string, string>) => void;
+  userKeys?: Record<string, any>;
+  onUpdateUserKeys?: (keys: Record<string, any>) => void;
+}
+
+interface CustomProviderEntry {
+  id: string;
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  modelId: string;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -31,22 +39,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [customGeminiKey, setCustomGeminiKey] = React.useState(userKeys.gemini || '');
   const [customOpenaiKey, setCustomOpenaiKey] = React.useState(userKeys.openai || '');
   const [customGroqKey, setCustomGroqKey] = React.useState(userKeys.groq || '');
+  const [customAnthropicKey, setCustomAnthropicKey] = React.useState(userKeys.anthropic || '');
+  const [customDeepseekKey, setCustomDeepseekKey] = React.useState(userKeys.deepseek || '');
+  const [customOpenrouterKey, setCustomOpenrouterKey] = React.useState(userKeys.openrouter || '');
+  const [customTogetherKey, setCustomTogetherKey] = React.useState(userKeys.together || '');
+  const [customPexelsKey, setCustomPexelsKey] = React.useState(userKeys.pexelsKey || '');
+  const [customProviders, setCustomProviders] = React.useState<CustomProviderEntry[]>(
+    (userKeys.customProviders || []).map((c: any) => ({
+      id: c.id, name: c.name || '', apiKey: c.apiKey || '', baseUrl: c.baseUrl || '', modelId: c.modelId || '',
+    }))
+  );
   const [saved, setSaved] = React.useState(false);
 
   React.useEffect(() => {
     setCustomGeminiKey(userKeys.gemini || '');
     setCustomOpenaiKey(userKeys.openai || '');
     setCustomGroqKey(userKeys.groq || '');
+    setCustomAnthropicKey(userKeys.anthropic || '');
+    setCustomDeepseekKey(userKeys.deepseek || '');
+    setCustomOpenrouterKey(userKeys.openrouter || '');
+    setCustomTogetherKey(userKeys.together || '');
+    setCustomPexelsKey(userKeys.pexelsKey || '');
+    setCustomProviders(
+      (userKeys.customProviders || []).map((c: any) => ({
+        id: c.id, name: c.name || '', apiKey: c.apiKey || '', baseUrl: c.baseUrl || '', modelId: c.modelId || '',
+      }))
+    );
   }, [userKeys, isOpen]);
 
+  const handleAddCustomProvider = () => {
+    setCustomProviders((prev) => [
+      ...prev,
+      { id: `custom_${Date.now()}`, name: '', apiKey: '', baseUrl: '', modelId: '' },
+    ]);
+  };
+
+  const handleRemoveCustomProvider = (id: string) => {
+    setCustomProviders((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const handleCustomProviderChange = (id: string, field: keyof CustomProviderEntry, value: string) => {
+    setCustomProviders((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
+  };
+
   const handleSaveKeys = () => {
-    const updated: Record<string, string> = { ...userKeys };
+    const updated: Record<string, any> = { ...userKeys };
     if (customGeminiKey.trim()) updated.gemini = customGeminiKey.trim();
     else delete updated.gemini;
     if (customOpenaiKey.trim()) updated.openai = customOpenaiKey.trim();
     else delete updated.openai;
     if (customGroqKey.trim()) updated.groq = customGroqKey.trim();
     else delete updated.groq;
+    if (customAnthropicKey.trim()) updated.anthropic = customAnthropicKey.trim();
+    else delete updated.anthropic;
+    if (customDeepseekKey.trim()) updated.deepseek = customDeepseekKey.trim();
+    else delete updated.deepseek;
+    if (customOpenrouterKey.trim()) updated.openrouter = customOpenrouterKey.trim();
+    else delete updated.openrouter;
+    if (customTogetherKey.trim()) updated.together = customTogetherKey.trim();
+    else delete updated.together;
+    if (customPexelsKey.trim()) updated.pexelsKey = customPexelsKey.trim();
+    else delete updated.pexelsKey;
+
+    const validCustomProviders = customProviders
+      .filter((c) => c.apiKey.trim() && c.baseUrl.trim())
+      .map((c) => ({
+        id: c.id,
+        name: c.name.trim() || 'Custom API',
+        apiKey: c.apiKey.trim(),
+        baseUrl: c.baseUrl.trim(),
+        modelId: c.modelId.trim() || undefined,
+      }));
+    if (validCustomProviders.length > 0) updated.customProviders = validCustomProviders;
+    else delete updated.customProviders;
+
     onUpdateUserKeys?.(updated);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -126,7 +192,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div>
                   <h4 className="font-bold text-white text-sm">Fully Automatic Engine Selection</h4>
                   <p className="text-xs text-slate-300 mt-1">
-                    Aapko koi engine manually select nahi karna — BuildMate Smart Router har request ke liye khud best available AI model choose karta hai, aur agar ek provider limit hit ho jaye to automatically doosre provider par switch ho jata hai. Neeche list sirf informational hai.
+                    Aapko koi engine manually select nahi karna — BuildMate Smart Router har request ke liye khud best available AI model choose karta hai, aur agar ek provider kaam na kare to automatically doosre provider par switch ho jata hai. Neeche list sirf informational hai.
                   </p>
                 </div>
               </div>
@@ -160,7 +226,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div>
                   <h4 className="font-bold text-white text-sm">Multi-Provider Smart Router Active</h4>
                   <p className="text-xs text-slate-300 mt-1">
-                    BuildMate AI automatically routes requests across multiple AI providers with instant failover — koi limit ya error aaye tab bhi aapko kuch karne ki zaroorat nahi, sab kuch background mein handle ho jata hai.
+                    BuildMate AI automatically routes requests across multiple AI providers with instant failover — koi bhi error aaye tab bhi aapko kuch karne ki zaroorat nahi, sab kuch background mein handle ho jata hai.
                   </p>
                 </div>
               </div>
@@ -182,7 +248,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   Free API Key Kahan Se Milegi?
                 </h5>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Agar shared quota khatam ho jaye ya AI kaam na kare, to neeche diye gaye providers se <strong>bilkul free</strong> apni API key bana kar yahan add kar dein — chand minutes ka kaam hai:
+                  Agar hamari taraf se shared/default API update nahi ki gayi ho ya AI kaam na kare, to neeche diye gaye providers se <strong>bilkul free</strong> apni API key bana kar yahan add kar dein — chand minutes ka kaam hai:
                 </p>
                 <ul className="text-[11px] text-slate-300 space-y-1.5 pl-1">
                   <li>
@@ -212,7 +278,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   Add Your Own API Key (Optional)
                 </h5>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Ye bilkul optional hai — agar aap apni personal Gemini, OpenAI, ya Groq key add karte hain, to aapki requests us key se jayengi aur shared server quota par pressure nahi padega. Blank chor dein to sab kuch pehle jaisa automatic rahega.
+                  Ye bilkul optional hai — agar aap apni personal key kisi bhi provider (Gemini, OpenAI, Groq, DeepSeek, Anthropic, OpenRouter, Together) ki add karte hain, to zaroorat parne par router us key ko bhi use kar sakta hai. Blank chor dein to sab kuch pehle jaisa automatic rahega.
                 </p>
 
                 <div className="space-y-1">
@@ -246,6 +312,135 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     placeholder="gsk_..."
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">DeepSeek API Key</label>
+                  <input
+                    type="password"
+                    value={customDeepseekKey}
+                    onChange={(e) => setCustomDeepseekKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Anthropic (Claude) API Key</label>
+                  <input
+                    type="password"
+                    value={customAnthropicKey}
+                    onChange={(e) => setCustomAnthropicKey(e.target.value)}
+                    placeholder="sk-ant-..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">OpenRouter API Key (Free tier)</label>
+                  <input
+                    type="password"
+                    value={customOpenrouterKey}
+                    onChange={(e) => setCustomOpenrouterKey(e.target.value)}
+                    placeholder="sk-or-..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Together AI API Key</label>
+                  <input
+                    type="password"
+                    value={customTogetherKey}
+                    onChange={(e) => setCustomTogetherKey(e.target.value)}
+                    placeholder="..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div className="pt-2 border-t border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">Pexels API Key (Slide Images)</label>
+                    <a
+                      href="https://www.pexels.com/api/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-semibold text-indigo-300 hover:text-indigo-200 underline underline-offset-2"
+                    >
+                      Get free key →
+                    </a>
+                  </div>
+                  <input
+                    type="password"
+                    value={customPexelsKey}
+                    onChange={(e) => setCustomPexelsKey(e.target.value)}
+                    placeholder="563492ad..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Optional — is key ke sath PowerPoint Studio har slide ke liye AI-picked ek relevant free stock photo bhi add kar deta hai. Free, instant, no attribution required.
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase">Custom APIs (jitni chahen utni add karein)</label>
+                    <button
+                      onClick={handleAddCustomProvider}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-[10px] font-bold transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Custom API</span>
+                    </button>
+                  </div>
+
+                  {customProviders.length === 0 && (
+                    <p className="text-[10px] text-slate-500">
+                      Koi bhi OpenAI-compatible endpoint (apna proxy, self-hosted model, ya koi aur provider) yahan add kar sakte hain — jitne chahein utne.
+                    </p>
+                  )}
+
+                  {customProviders.map((cp) => (
+                    <div key={cp.id} className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <input
+                          type="text"
+                          value={cp.name}
+                          onChange={(e) => handleCustomProviderChange(cp.id, 'name', e.target.value)}
+                          placeholder="Naam (e.g. My Proxy)"
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none"
+                        />
+                        <button
+                          onClick={() => handleRemoveCustomProvider(cp.id)}
+                          className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer flex-shrink-0"
+                          title="Remove"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <input
+                        type="password"
+                        value={cp.apiKey}
+                        onChange={(e) => handleCustomProviderChange(cp.id, 'apiKey', e.target.value)}
+                        placeholder="API Key"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={cp.baseUrl}
+                        onChange={(e) => handleCustomProviderChange(cp.id, 'baseUrl', e.target.value)}
+                        placeholder="Base URL (e.g. https://api.example.com/v1)"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={cp.modelId}
+                        onChange={(e) => handleCustomProviderChange(cp.id, 'modelId', e.target.value)}
+                        placeholder="Model ID (optional, e.g. gpt-4o-mini)"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none font-mono"
+                      />
+                    </div>
+                  ))}
                 </div>
 
                 <button

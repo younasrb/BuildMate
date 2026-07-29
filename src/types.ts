@@ -83,6 +83,7 @@ export interface Slide {
   bulletPoints: string[];
   speakerNotes: string;
   visualPrompt?: string;
+  imageUrl?: string;
 }
 
 export interface PresentationData {

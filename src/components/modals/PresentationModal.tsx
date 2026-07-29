@@ -83,6 +83,13 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
     setActiveSlideIndex((prev) => Math.min(prev, updatedSlides.length - 1));
   };
 
+  const handleUpdateSlideLayout = (newLayout: string) => {
+    if (!presentation) return;
+    const updated = [...presentation.slides];
+    updated[activeSlideIndex].layout = newLayout;
+    setPresentation({ ...presentation, slides: updated });
+  };
+
   const handleUpdateSlideTitle = (newTitle: string) => {
     if (!presentation) return;
     const updated = [...presentation.slides];
@@ -119,6 +126,14 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
   };
 
   const currentSlide = presentation?.slides?.[activeSlideIndex];
+
+  const LAYOUT_OPTIONS: { id: string; name: string }[] = [
+    { id: 'bullet_list', name: 'Bullet List' },
+    { id: 'section_header', name: 'Section Header' },
+    { id: 'two_column', name: 'Two Column' },
+    { id: 'quote', name: 'Quote / Statement' },
+    { id: 'stat_highlight', name: 'Stat Highlight' },
+  ];
 
   const THEME_OPTIONS: { id: PPTTheme; name: string; bg: string; accent: string }[] = [
     { id: 'dark', name: 'Slate Dark', bg: 'bg-slate-900', accent: 'bg-indigo-500' },
@@ -290,29 +305,50 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
 
                 {/* Slide Body */}
                 <div className="space-y-4">
-                  {/* Slide Title */}
+                  {/* Slide Title + Layout Picker */}
                   {isEditing ? (
-                    <div>
-                      <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Slide Title</label>
-                      <input
-                        type="text"
-                        value={currentSlide.title}
-                        onChange={(e) => handleUpdateSlideTitle(e.target.value)}
-                        className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2 text-white font-bold text-base focus:outline-none"
-                      />
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1">
+                        <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Slide Title</label>
+                        <input
+                          type="text"
+                          value={currentSlide.title}
+                          onChange={(e) => handleUpdateSlideTitle(e.target.value)}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2 text-white font-bold text-base focus:outline-none"
+                        />
+                      </div>
+                      <div className="sm:w-44">
+                        <label className="text-[10px] font-bold text-amber-400 uppercase block mb-1">Layout</label>
+                        <select
+                          value={currentSlide.layout || 'bullet_list'}
+                          onChange={(e) => handleUpdateSlideLayout(e.target.value)}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2 text-white text-xs focus:outline-none"
+                        >
+                          {LAYOUT_OPTIONS.map((l) => (
+                            <option key={l.id} value={l.id}>{l.name}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   ) : (
-                    <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2">
-                      <Monitor className="w-5 h-5 text-orange-400" />
-                      {currentSlide.title}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2">
+                        <Monitor className="w-5 h-5 text-orange-400" />
+                        {currentSlide.title}
+                      </h2>
+                      <span className="text-[9px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono uppercase tracking-wide">
+                        {LAYOUT_OPTIONS.find((l) => l.id === (currentSlide.layout || 'bullet_list'))?.name || currentSlide.layout}
+                      </span>
+                    </div>
                   )}
 
-                  {/* Bullet Points */}
+                  {/* Bullet Points / Layout-aware Content */}
                   {isEditing ? (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-amber-400 uppercase">Bullet Points</label>
+                        <label className="text-[10px] font-bold text-amber-400 uppercase">
+                          {currentSlide.layout === 'quote' ? 'Quote Text' : currentSlide.layout === 'stat_highlight' ? 'Stat + Caption' : 'Bullet Points'}
+                        </label>
                         <button
                           onClick={handleAddBulletPoint}
                           className="text-[10px] text-amber-400 hover:underline flex items-center gap-0.5 cursor-pointer"
@@ -337,15 +373,66 @@ export const PresentationModal: React.FC<PresentationModalProps> = ({
                         </div>
                       ))}
                     </div>
+                  ) : currentSlide.layout === 'quote' ? (
+                    <blockquote className="border-l-4 border-orange-400 pl-4 py-2 text-lg md:text-xl font-bold italic text-slate-100 leading-snug">
+                      {currentSlide.bulletPoints?.[0]}
+                    </blockquote>
+                  ) : currentSlide.layout === 'stat_highlight' ? (
+                    <div className="text-center py-2">
+                      <div className="text-4xl md:text-5xl font-black text-orange-400">{currentSlide.bulletPoints?.[0]}</div>
+                      {currentSlide.bulletPoints?.[1] && (
+                        <p className="text-sm text-slate-300 mt-2">{currentSlide.bulletPoints[1]}</p>
+                      )}
+                    </div>
+                  ) : currentSlide.layout === 'section_header' ? (
+                    <div
+                      className="relative text-center py-10 rounded-xl overflow-hidden bg-cover bg-center"
+                      style={currentSlide.imageUrl ? { backgroundImage: `url(${currentSlide.imageUrl})` } : undefined}
+                    >
+                      {currentSlide.imageUrl && <div className="absolute inset-0 bg-black/50" />}
+                      <div className="relative">
+                        <p className="text-[10px] uppercase tracking-widest text-orange-400 font-bold mb-1">Section</p>
+                        {currentSlide.bulletPoints?.[0] && (
+                          <p className={`text-sm italic ${currentSlide.imageUrl ? 'text-slate-200' : 'text-slate-400'}`}>{currentSlide.bulletPoints[0]}</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : currentSlide.layout === 'two_column' && (currentSlide.bulletPoints?.length || 0) > 1 ? (
+                    <div className="grid grid-cols-2 gap-6">
+                      {[0, 1].map((col) => {
+                        const bp = currentSlide.bulletPoints || [];
+                        const mid = Math.ceil(bp.length / 2);
+                        const items = col === 0 ? bp.slice(0, mid) : bp.slice(mid);
+                        return (
+                          <ul key={col} className="space-y-3 font-sans text-slate-200">
+                            {items.map((bp, bidx) => (
+                              <li key={bidx} className="flex items-start gap-2.5 text-xs md:text-sm">
+                                <span className="w-2 h-2 rounded-full bg-orange-400 mt-1.5 flex-shrink-0"></span>
+                                <span className="leading-relaxed">{bp}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <ul className="space-y-3 font-sans text-slate-200">
-                      {currentSlide.bulletPoints?.map((bp, bidx) => (
-                        <li key={bidx} className="flex items-start gap-2.5 text-xs md:text-sm">
-                          <span className="w-2 h-2 rounded-full bg-orange-400 mt-1.5 flex-shrink-0"></span>
-                          <span className="leading-relaxed">{bp}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className={currentSlide.imageUrl ? 'grid grid-cols-3 gap-4' : ''}>
+                      <ul className={`space-y-3 font-sans text-slate-200 ${currentSlide.imageUrl ? 'col-span-2' : ''}`}>
+                        {currentSlide.bulletPoints?.map((bp, bidx) => (
+                          <li key={bidx} className="flex items-start gap-2.5 text-xs md:text-sm">
+                            <span className="w-2 h-2 rounded-full bg-orange-400 mt-1.5 flex-shrink-0"></span>
+                            <span className="leading-relaxed">{bp}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {currentSlide.imageUrl && (
+                        <img
+                          src={currentSlide.imageUrl}
+                          alt=""
+                          className="col-span-1 w-full h-32 md:h-full object-cover rounded-lg border border-slate-700"
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
 

@@ -8,7 +8,8 @@ export type ProviderId =
   | 'together'
   | 'ollama'
   | 'lmstudio'
-  | 'custom_openai';
+  | 'custom_openai'
+  | (string & {}); // also allow arbitrary ids for user-added custom providers
 
 export type ModelCategory = 'Fast' | 'Balanced' | 'Premium' | 'Reasoning' | 'Coding' | 'Vision';
 
@@ -40,6 +41,19 @@ export interface ProviderDefinition {
   models: ModelSpec[];
 }
 
+/**
+ * A user-added custom OpenAI-compatible API endpoint. A user can add any
+ * number of these (their own proxy, a self-hosted model, any provider that
+ * speaks the OpenAI /chat/completions format).
+ */
+export interface CustomProviderConfig {
+  id: string;         // unique id, e.g. "custom_1706000000000"
+  name: string;        // display name the user gave it
+  apiKey: string;
+  baseUrl: string;
+  modelId?: string;    // model id to send in requests; defaults to a generic chat model id
+}
+
 export interface UserKeys {
   gemini?: string;
   openai?: string;
@@ -52,7 +66,10 @@ export interface UserKeys {
   lmstudioBaseUrl?: string;
   customOpenaiKey?: string;
   customOpenaiBaseUrl?: string;
+  customProviders?: CustomProviderConfig[];
+  pexelsKey?: string;
 }
+
 
 export interface RouterRequest {
   message: string;

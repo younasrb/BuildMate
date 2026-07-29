@@ -9,8 +9,8 @@ export class GeminiAdapter extends BaseAdapter {
 
   readonly models: ModelSpec[] = [
     {
-      id: 'gemini-3.6-flash',
-      name: 'Gemini 3.6 Flash',
+      id: 'gemini-2.5-flash',
+      name: 'Gemini 2.5 Flash',
       category: 'Fast',
       contextWindow: '1M Tokens',
       costPer1kInputTokenUsd: 0.000075,
@@ -18,8 +18,8 @@ export class GeminiAdapter extends BaseAdapter {
       benchmarkScore: 92,
     },
     {
-      id: 'gemini-3.1-pro-preview',
-      name: 'Gemini 3.1 Pro',
+      id: 'gemini-2.5-pro',
+      name: 'Gemini 2.5 Pro',
       category: 'Balanced',
       contextWindow: '2M Tokens',
       costPer1kInputTokenUsd: 0.00125,
@@ -27,8 +27,8 @@ export class GeminiAdapter extends BaseAdapter {
       benchmarkScore: 96,
     },
     {
-      id: 'gemini-3.1-flash-lite',
-      name: 'Gemini 3.1 Flash Lite',
+      id: 'gemini-2.5-flash-lite',
+      name: 'Gemini 2.5 Flash Lite',
       category: 'Fast',
       contextWindow: '1M Tokens',
       costPer1kInputTokenUsd: 0.0000375,
@@ -36,8 +36,8 @@ export class GeminiAdapter extends BaseAdapter {
       benchmarkScore: 88,
     },
     {
-      id: 'gemini-flash-latest',
-      name: 'Gemini Flash Latest',
+      id: 'gemini-2.0-flash',
+      name: 'Gemini 2.0 Flash',
       category: 'Coding',
       contextWindow: '1M Tokens',
       costPer1kInputTokenUsd: 0.000075,

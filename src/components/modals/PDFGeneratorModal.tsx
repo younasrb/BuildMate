@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { PDFData } from '../../types';
-import { downloadPDF } from '../../utils/pdfGenerator';
+import { downloadPDF, PDF_THEME_OPTIONS, PDFTheme } from '../../utils/pdfGenerator';
 import { downloadWordDocument } from '../../utils/exporter';
-import { X, FileText, Download, Sparkles, RefreshCw, Layers, FileCode, ExternalLink } from 'lucide-react';
+import { X, FileText, Download, Sparkles, RefreshCw, Layers, FileCode, ExternalLink, Palette } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AIGeneratorLoader } from '../AIGeneratorLoader';
 
@@ -26,6 +26,7 @@ export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [pdfData, setPdfData] = useState<PDFData | null>(initialData || null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pdfTheme, setPdfTheme] = useState<PDFTheme>('indigo');
 
   React.useEffect(() => {
     if (isOpen && initialTopic && initialTopic.trim()) {
@@ -55,7 +56,7 @@ export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
 
   const handleDownload = () => {
     if (pdfData) {
-      downloadPDF(pdfData);
+      downloadPDF(pdfData, pdfTheme);
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
     }
   };
@@ -151,7 +152,20 @@ export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
                     BY: {pdfData.author} | DATE: {pdfData.date}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <Palette className="w-3.5 h-3.5 text-amber-400" />
+                    <select
+                      value={pdfTheme}
+                      onChange={(e) => setPdfTheme(e.target.value as PDFTheme)}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 text-xs focus:border-indigo-500 focus:outline-none"
+                      title="Document template"
+                    >
+                      {PDF_THEME_OPTIONS.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
                   <button
                     onClick={handleDownload}
                     className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
@@ -163,7 +177,7 @@ export const PDFGeneratorModal: React.FC<PDFGeneratorModalProps> = ({
                   <button
                     onClick={() => {
                       if (pdfData) {
-                        downloadWordDocument(pdfData);
+                        downloadWordDocument(pdfData, pdfTheme);
                         confetti({ particleCount: 90, spread: 60 });
                       }
                     }}

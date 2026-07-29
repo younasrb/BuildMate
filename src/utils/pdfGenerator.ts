@@ -1,7 +1,25 @@
 import jsPDF from 'jspdf';
 import { PDFData } from '../types';
 
-export function downloadPDF(pdfData: PDFData) {
+export type PDFTheme = 'indigo' | 'corporate' | 'academic' | 'emerald' | 'mono';
+
+export const PDF_THEME_OPTIONS: { id: PDFTheme; name: string }[] = [
+  { id: 'indigo', name: 'Modern Indigo' },
+  { id: 'corporate', name: 'Corporate Navy' },
+  { id: 'academic', name: 'Academic Report' },
+  { id: 'emerald', name: 'Emerald Fresh' },
+  { id: 'mono', name: 'Clean Mono' },
+];
+
+const PDF_THEMES: Record<PDFTheme, { primary: number[]; dark: number[]; muted: number[]; summaryBg: number[] }> = {
+  indigo:    { primary: [99, 102, 241],  dark: [30, 41, 59],  muted: [100, 116, 139], summaryBg: [248, 250, 252] },
+  corporate: { primary: [30, 58, 95],    dark: [26, 32, 44],  muted: [100, 116, 139], summaryBg: [240, 244, 248] },
+  academic:  { primary: [107, 33, 33],   dark: [40, 40, 40],  muted: [107, 107, 107], summaryBg: [250, 247, 242] },
+  emerald:   { primary: [5, 122, 85],    dark: [22, 43, 38],  muted: [90, 122, 110],  summaryBg: [240, 250, 246] },
+  mono:      { primary: [30, 30, 30],    dark: [20, 20, 20],  muted: [110, 110, 110], summaryBg: [245, 245, 245] },
+};
+
+export function downloadPDF(pdfData: PDFData, theme: PDFTheme = 'indigo') {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -13,10 +31,10 @@ export function downloadPDF(pdfData: PDFData) {
   const margin = 20;
   let cursorY = 25;
 
-  // Primary Theme Colors (Deep Indigo & Purple)
-  const primaryColor = [99, 102, 241]; // #6366f1
-  const darkTextColor = [30, 41, 59]; // slate-800
-  const mutedTextColor = [100, 116, 139]; // slate-500
+  const themeColors = PDF_THEMES[theme] || PDF_THEMES.indigo;
+  const primaryColor = themeColors.primary;
+  const darkTextColor = themeColors.dark;
+  const mutedTextColor = themeColors.muted;
 
   // Header Banner
   doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
@@ -53,8 +71,8 @@ export function downloadPDF(pdfData: PDFData) {
 
   // Executive Summary Box
   if (pdfData.summary) {
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(99, 102, 241);
+    doc.setFillColor(themeColors.summaryBg[0], themeColors.summaryBg[1], themeColors.summaryBg[2]);
+    doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
     doc.setLineWidth(0.8);
 
     const summaryLines = doc.splitTextToSize(pdfData.summary, pageWidth - margin * 2 - 8);
@@ -106,7 +124,7 @@ export function downloadPDF(pdfData: PDFData) {
             doc.addPage();
             cursorY = 25;
           }
-          doc.setFillColor(99, 102, 241);
+          doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
           doc.circle(margin + 3, cursorY - 1.5, 1, 'F');
 
           const bpLines = doc.splitTextToSize(bp, pageWidth - margin * 2 - 8);

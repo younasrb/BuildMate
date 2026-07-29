@@ -1,10 +1,32 @@
 import express, { Express } from 'express';
-import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import { routingEngine } from './routingEngine.js';
 import { ProviderId, ModelCategory, RoutingStrategy } from './types/routerTypes.js';
 
 dotenv.config();
+
+/**
+ * Looks up a relevant stock photo for a slide's visual prompt using the Pexels API
+ * (free, no attribution required). Returns a direct image URL, or null if no key is
+ * configured or the search fails — callers must treat this as a soft/optional feature,
+ * never block presentation generation on it.
+ */
+async function searchPexelsImage(query: string, apiKey?: string): Promise<string | null> {
+  const key = apiKey || process.env.PEXELS_API_KEY;
+  if (!key || !query || !query.trim()) return null;
+
+  try {
+    const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query.trim())}&per_page=1&orientation=landscape`;
+    const res = await fetch(url, { headers: { Authorization: key } });
+    if (!res.ok) return null;
+    const data: any = await res.json();
+    const photo = data?.photos?.[0];
+    return photo?.src?.large || photo?.src?.landscape || photo?.src?.original || null;
+  } catch (err: any) {
+    console.warn('[Pexels Image Search] Failed:', err?.message || err);
+    return null;
+  }
+}
 
 /**
  * Builds and returns the fully configured Express app with every
@@ -35,19 +57,6 @@ export function createApp(): Express {
     if (provided && provided === ADMIN_PASSWORD) return next();
     return res.status(401).json({ error: 'Unauthorized. Admin password required.' });
   };
-
-  // Initialize Gemini AI Client (for legacy fallback if needed)
-  function getGenAI() {
-    const apiKey = process.env.GEMINI_API_KEY;
-    return new GoogleGenAI({
-      apiKey: apiKey || '',
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  }
 
   // Health check API
   app.get('/api/health', (_req, res) => {
@@ -174,12 +183,14 @@ You assist developers, students, and professionals with:
   app.post('/api/v1/providers', (req, res) => {
     const userKeys = req.body?.userKeys;
     const adapters = routingEngine.getAllAdapters();
+    const customAdapters = routingEngine.buildCustomAdapters({ message: '', userKeys } as any);
 
-    const providerList = adapters.map((a) => ({
+    const providerList = [...adapters, ...customAdapters].map((a) => ({
       id: a.id,
       name: a.name,
       isConfigured: a.isAvailable(userKeys),
       models: a.models,
+      custom: customAdapters.includes(a),
     }));
 
     res.json({ success: true, providers: providerList });
@@ -225,64 +236,51 @@ You assist developers, students, and professionals with:
     res.json({ success: true, message: 'Analytics logs reset successfully.' });
   });
 
+  // Shared helper: pull a clean JSON object out of a raw LLM reply that may be
+  // wrapped in markdown fences or have stray text around it.
+  function extractJson(raw: string): any {
+    let text = (raw || '').trim();
+    text = text.replace(/^```(json)?/i, '').replace(/```$/i, '').trim();
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      text = text.slice(firstBrace, lastBrace + 1);
+    }
+    return JSON.parse(text);
+  }
+
   /* ==========================================================================
      SPECIALIZED FEATURES (PDF, Presentation, Summarizer)
      ========================================================================== */
 
   // Specialized API: Structured PDF Content Generation
   app.post('/api/generate-pdf-content', async (req, res) => {
-    const { topic = 'Report', instructions, language = 'English' } = req.body;
-    const ai = getGenAI();
+    const { topic = 'Report', instructions, language = 'English', userKeys } = req.body;
     const prompt = `Generate a structured document report for topic: "${topic}".
 Instructions: ${instructions || 'Comprehensive report with executive summary, key findings, analysis, and recommendations.'}
-Language preference: ${language}`;
+Language preference: ${language}
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+Return ONLY a valid JSON object (no markdown fences, no commentary) with this exact shape:
+{
+  "title": "string", "subtitle": "string", "author": "string", "date": "string",
+  "summary": "string",
+  "sections": [ { "heading": "string", "content": "string", "bulletPoints": ["string"] } ],
+  "conclusion": "string"
+}
+Include at least 3 sections. Escape all special characters correctly so the JSON parses cleanly.`;
+
     let pdfData: any = null;
+    let noProviderAvailable = false;
 
-    for (const model of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                subtitle: { type: Type.STRING },
-                author: { type: Type.STRING },
-                date: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                sections: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      heading: { type: Type.STRING },
-                      content: { type: Type.STRING },
-                      bulletPoints: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING },
-                      },
-                    },
-                    required: ['heading', 'content'],
-                  },
-                },
-                conclusion: { type: Type.STRING },
-              },
-              required: ['title', 'subtitle', 'summary', 'sections', 'conclusion'],
-            },
-          },
-        });
-        if (response && response.text) {
-          pdfData = JSON.parse(response.text);
-          break;
-        }
-      } catch (err: any) {
-        console.warn(`[PDF Generator] Model ${model} failed, trying next:`, err?.message || err);
+    try {
+      const result = await routingEngine.routeChat({ message: prompt, category: 'Balanced', strategy: 'auto', userKeys });
+      if (result.status === 'error' || result.noProviderAvailable) {
+        noProviderAvailable = true;
+      } else {
+        pdfData = extractJson(result.reply);
       }
+    } catch (err: any) {
+      console.warn('[PDF Generator] Failed:', err?.message || err);
     }
 
     // If generation truly failed (no key / all attempts failed), tell the truth
@@ -290,8 +288,10 @@ Language preference: ${language}`;
     if (!pdfData) {
       return res.status(503).json({
         success: false,
-        noProviderAvailable: true,
-        error: 'PDF content generate nahi ho saka. Koi AI provider available nahi hai — apni Custom API key add karein.',
+        noProviderAvailable,
+        error: noProviderAvailable
+          ? 'PDF content generate nahi ho saka — hamari taraf se shared/default API is waqt update nahi ki gayi hai. Apni khud ki API key bilkul free mein add kar ke enjoy karein.'
+          : 'PDF content generate nahi ho saka. Dobara koshish karein.',
       });
     }
 
@@ -300,64 +300,61 @@ Language preference: ${language}`;
 
   // Specialized API: Structured Presentation Generator
   app.post('/api/generate-presentation', async (req, res) => {
-    const { topic = 'Presentation', slideCount = 5, audience = 'General' } = req.body;
-    const ai = getGenAI();
-    const prompt = `Create a presentation outline with ${slideCount} slides for topic: "${topic}". Target audience: ${audience}.`;
+    const { topic = 'Presentation', slideCount = 5, audience = 'General', userKeys } = req.body;
+    const prompt = `Create a professional presentation outline with ${slideCount} slides for topic: "${topic}". Target audience: ${audience}.
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+Each slide must use one of these exact layout values, chosen to fit the content (use variety, don't repeat the same layout every slide):
+- "section_header": a divider slide with just a short section title, no bullets (use bulletPoints: [] or one subtitle-like line) — good for the 1st slide of a new section
+- "bullet_list": standard title + 3-5 concise bullet points — the default for most content slides
+- "two_column": title + bullet points that naturally split into two related groups (e.g. pros/cons, before/after) — put all points in bulletPoints, they'll be split evenly
+- "quote": a single short powerful statement or quote as the only item in bulletPoints — good for emphasis slides
+- "stat_highlight": bulletPoints[0] is a short bold number/stat (e.g. "73%"), bulletPoints[1] is a one-line caption explaining it
+
+Return ONLY a valid JSON object (no markdown fences, no commentary) with this exact shape:
+{
+  "presentationTitle": "string", "presentationSubtitle": "string",
+  "slides": [ { "slideNumber": 1, "title": "string", "layout": "section_header|bullet_list|two_column|quote|stat_highlight", "bulletPoints": ["string"], "speakerNotes": "string", "visualPrompt": "string" } ]
+}
+Include exactly ${slideCount} slides, starting with a "section_header" slide. Escape all special characters correctly so the JSON parses cleanly.`;
+
     let presentation: any = null;
+    let noProviderAvailable = false;
 
-    for (const model of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                presentationTitle: { type: Type.STRING },
-                presentationSubtitle: { type: Type.STRING },
-                slides: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      slideNumber: { type: Type.INTEGER },
-                      title: { type: Type.STRING },
-                      layout: { type: Type.STRING },
-                      bulletPoints: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING },
-                      },
-                      speakerNotes: { type: Type.STRING },
-                      visualPrompt: { type: Type.STRING },
-                    },
-                    required: ['slideNumber', 'title', 'bulletPoints', 'speakerNotes'],
-                  },
-                },
-              },
-              required: ['presentationTitle', 'presentationSubtitle', 'slides'],
-            },
-          },
-        });
-        if (response && response.text) {
-          presentation = JSON.parse(response.text);
-          break;
-        }
-      } catch (err: any) {
-        console.warn(`[Presentation Generator] Model ${model} failed, trying next:`, err?.message || err);
+    try {
+      const result = await routingEngine.routeChat({ message: prompt, category: 'Balanced', strategy: 'auto', userKeys });
+      if (result.status === 'error' || result.noProviderAvailable) {
+        noProviderAvailable = true;
+      } else {
+        presentation = extractJson(result.reply);
       }
+    } catch (err: any) {
+      console.warn('[Presentation Generator] Failed:', err?.message || err);
     }
 
     // If generation truly failed, tell the truth instead of returning canned slides as "success".
     if (!presentation) {
       return res.status(503).json({
         success: false,
-        noProviderAvailable: true,
-        error: 'Presentation generate nahi ho saki. Koi AI provider available nahi hai — apni Custom API key add karein.',
+        noProviderAvailable,
+        error: noProviderAvailable
+          ? 'Presentation generate nahi ho saki — hamari taraf se shared/default API is waqt update nahi ki gayi hai. Apni khud ki API key bilkul free mein add kar ke enjoy karein.'
+          : 'Presentation generate nahi ho saki. Dobara koshish karein.',
       });
+    }
+
+    // Best-effort: attach a real stock photo per slide from its visualPrompt.
+    // Purely optional — if no Pexels key is configured (env or user's own), slides
+    // just render without an image, exactly like before. Never blocks the response.
+    const pexelsKey = userKeys?.pexelsKey;
+    if (Array.isArray(presentation.slides) && (pexelsKey || process.env.PEXELS_API_KEY)) {
+      await Promise.all(
+        presentation.slides.map(async (slide: any) => {
+          if (slide?.visualPrompt) {
+            const imageUrl = await searchPexelsImage(slide.visualPrompt, pexelsKey);
+            if (imageUrl) slide.imageUrl = imageUrl;
+          }
+        })
+      );
     }
 
     res.json({ success: true, presentation });
@@ -365,63 +362,40 @@ Language preference: ${language}`;
 
   // Specialized API: Summarize Document
   app.post('/api/summarize-document', async (req, res) => {
-    const { textContent = '', filename = 'Document' } = req.body;
-    const ai = getGenAI();
-    const prompt = `Analyze and summarize the following document content from "${filename}":\n\n${textContent.substring(0, 4000)}`;
+    const { textContent = '', filename = 'Document', userKeys } = req.body;
+    const prompt = `Analyze and summarize the following document content from "${filename}":\n\n${textContent.substring(0, 4000)}
 
-    const modelsToTry = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+Return ONLY a valid JSON object (no markdown fences, no commentary) with this exact shape:
+{
+  "documentTitle": "string", "executiveSummary": "string",
+  "keyTakeaways": ["string"],
+  "mainTopics": [ { "topic": "string", "details": "string" } ],
+  "actionItems": ["string"]
+}
+Escape all special characters correctly so the JSON parses cleanly.`;
+
     let summaryData: any = null;
+    let noProviderAvailable = false;
 
-    for (const model of modelsToTry) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                documentTitle: { type: Type.STRING },
-                executiveSummary: { type: Type.STRING },
-                keyTakeaways: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-                mainTopics: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      topic: { type: Type.STRING },
-                      details: { type: Type.STRING },
-                    },
-                  },
-                },
-                actionItems: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-              },
-              required: ['documentTitle', 'executiveSummary', 'keyTakeaways'],
-            },
-          },
-        });
-        if (response && response.text) {
-          summaryData = JSON.parse(response.text);
-          break;
-        }
-      } catch (err: any) {
-        console.warn(`[Document Summarizer] Model ${model} failed, trying next:`, err?.message || err);
+    try {
+      const result = await routingEngine.routeChat({ message: prompt, category: 'Balanced', strategy: 'auto', userKeys });
+      if (result.status === 'error' || result.noProviderAvailable) {
+        noProviderAvailable = true;
+      } else {
+        summaryData = extractJson(result.reply);
       }
+    } catch (err: any) {
+      console.warn('[Document Summarizer] Failed:', err?.message || err);
     }
 
     // If generation truly failed, tell the truth instead of returning a canned summary as "success".
     if (!summaryData) {
       return res.status(503).json({
         success: false,
-        noProviderAvailable: true,
-        error: 'Document summarize nahi ho saka. Koi AI provider available nahi hai — apni Custom API key add karein.',
+        noProviderAvailable,
+        error: noProviderAvailable
+          ? 'Document summarize nahi ho saka — hamari taraf se shared/default API is waqt update nahi ki gayi hai. Apni khud ki API key bilkul free mein add kar ke enjoy karein.'
+          : 'Document summarize nahi ho saka. Dobara koshish karein.',
       });
     }
 
@@ -430,7 +404,7 @@ Language preference: ${language}`;
 
   // Specialized API: Full Multi-File Project Generation
   app.post('/api/generate-project', async (req, res) => {
-    const { topic = 'New Project', language = 'javascript', description = '' } = req.body;
+    const { topic = 'New Project', language = 'javascript', description = '', userKeys } = req.body;
 
     const prompt = `Generate a small, complete, working ${language} project for: "${topic}".
 ${description ? `Additional requirements: ${description}` : ''}
@@ -455,6 +429,7 @@ Rules:
         message: prompt,
         category: 'Coding',
         strategy: 'auto',
+        userKeys,
       });
 
       if (result.status === 'error' || result.noProviderAvailable) {
@@ -485,7 +460,7 @@ Rules:
         success: false,
         noProviderAvailable,
         error: noProviderAvailable
-          ? 'Project generate nahi ho saka. Koi AI provider available nahi hai — apni Custom API key add karein.'
+          ? 'Project generate nahi ho saka — hamari taraf se shared/default API is waqt update nahi ki gayi hai. Apni khud ki API key bilkul free mein add kar ke enjoy karein.'
           : 'Project generate nahi ho saka. Dobara koshish karein.',
       });
     }

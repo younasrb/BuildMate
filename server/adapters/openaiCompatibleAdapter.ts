@@ -6,13 +6,37 @@ export class OpenAICompatibleAdapter extends BaseAdapter {
   readonly name: string;
   readonly defaultBaseUrl?: string;
   readonly models: ModelSpec[];
+  private readonly explicitApiKey?: string;
+  private readonly explicitBaseUrl?: string;
 
-  constructor(id: ProviderId, name: string, defaultBaseUrl: string | undefined, models: ModelSpec[]) {
+  constructor(
+    id: ProviderId,
+    name: string,
+    defaultBaseUrl: string | undefined,
+    models: ModelSpec[],
+    explicitApiKey?: string,
+    explicitBaseUrl?: string
+  ) {
     super();
     this.id = id;
     this.name = name;
     this.defaultBaseUrl = defaultBaseUrl;
     this.models = models;
+    this.explicitApiKey = explicitApiKey;
+    this.explicitBaseUrl = explicitBaseUrl;
+  }
+
+  // For user-added custom providers, the key/URL are already known at
+  // construction time (they don't live under a fixed UserKeys field like
+  // "gemini" or "groq" — there can be any number of them).
+  protected getApiKey(userKeys?: UserKeys): string | undefined {
+    if (this.explicitApiKey) return this.explicitApiKey;
+    return super.getApiKey(userKeys);
+  }
+
+  protected getBaseUrl(userKeys?: UserKeys): string {
+    if (this.explicitBaseUrl) return this.explicitBaseUrl;
+    return super.getBaseUrl(userKeys);
   }
 
   async testConnection(userKeys?: UserKeys): Promise<{ success: boolean; latencyMs: number; error?: string }> {

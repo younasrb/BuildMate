@@ -2,6 +2,28 @@ import { PDFData, PresentationData } from '../types';
 import pptxgen from 'pptxgenjs';
 
 /**
+ * Fetches a remote image and converts it to a base64 data URI so it can be embedded
+ * reliably in the generated .pptx (avoids depending on pptxgenjs's own remote fetch,
+ * which is more sensitive to CORS). Returns null on any failure — image is optional,
+ * export must never fail because a photo didn't load.
+ */
+async function imageUrlToDataUri(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Downloads presentation data as a real native PowerPoint (.pptx) file directly
  * with custom Theme color choices (dark, light, navy, emerald, sunset)
  */
@@ -21,6 +43,11 @@ export async function downloadNativePPTX(
   };
 
   const theme = THEMES[themeStyle] || THEMES.dark;
+
+  // Pre-fetch every slide's image (if any) once, in parallel, before building slides.
+  const slideImages = await Promise.all(
+    data.slides.map((s) => (s.imageUrl ? imageUrlToDataUri(s.imageUrl) : Promise.resolve(null)))
+  );
 
   const pptx = new pptxgen();
   pptx.layout = 'LAYOUT_16x9';
@@ -50,40 +77,114 @@ export async function downloadNativePPTX(
     align: 'center'
   });
 
-  // Content Slides
+  // Content Slides — layout-aware rendering so each slide.layout looks distinct & professional
   data.slides.forEach((s, idx) => {
     const slide = pptx.addSlide();
     slide.background = { color: theme.bg };
+    const layout = (s.layout || 'bullet_list').toLowerCase();
+    const bullets = s.bulletPoints || [];
+    const slideImage = slideImages[idx];
 
-    // Top Accent Bar
-    slide.addShape('rect', {
-      x: 0, y: 0, w: 13.33, h: 0.15, fill: { color: theme.accent }
-    });
-
-    // Badge Slide number
-    slide.addText(`SLIDE ${idx + 1} / ${data.slides.length}`, {
-      x: 9.8, y: 0.3, w: 2.8, h: 0.4,
-      fontSize: 11, bold: true, color: theme.badgeColor,
-      align: 'right'
-    });
-
-    // Slide Title
-    slide.addText(s.title || `Slide ${idx + 1}`, {
-      x: 0.8, y: 0.4, w: 9.0, h: 0.9,
-      fontSize: 24, bold: true, color: theme.titleColor
-    });
-
-    // Bullet Points
-    if (s.bulletPoints && s.bulletPoints.length > 0) {
-      const formattedBullets = s.bulletPoints.map(bp => ({
-        text: bp,
-        options: { fontSize: 16, color: theme.textColor, bullet: true, spaceAfter: 10 }
-      }));
-
-      slide.addText(formattedBullets, {
-        x: 0.8, y: 1.5, w: 11.7, h: 5.0,
-        valign: 'top'
+    // Badge Slide number (every layout except section_header, which is a clean divider)
+    if (layout !== 'section_header') {
+      slide.addText(`SLIDE ${idx + 1} / ${data.slides.length}`, {
+        x: 9.8, y: 0.3, w: 2.8, h: 0.4,
+        fontSize: 11, bold: true, color: theme.badgeColor,
+        align: 'right'
       });
+    }
+
+    if (layout === 'section_header') {
+      if (slideImage) {
+        // Full-bleed photo background with a dark overlay so white text stays readable
+        slide.addImage({ data: slideImage, x: 0, y: 0, w: 13.33, h: 7.5 });
+        slide.addShape('rect', { x: 0, y: 0, w: 13.33, h: 7.5, fill: { color: '000000', transparency: 45 } });
+        slide.addText(`SECTION ${idx + 1}`, {
+          x: 0.8, y: 2.6, w: 11.7, h: 0.5,
+          fontSize: 13, bold: true, color: 'FFFFFF', align: 'center', charSpacing: 2
+        });
+        slide.addText(s.title || `Slide ${idx + 1}`, {
+          x: 0.8, y: 3.1, w: 11.7, h: 1.3,
+          fontSize: 34, bold: true, color: 'FFFFFF',
+          align: 'center'
+        });
+        if (bullets[0]) {
+          slide.addText(bullets[0], {
+            x: 1.5, y: 4.4, w: 10.3, h: 0.7,
+            fontSize: 15, italic: true, color: 'FFFFFF', align: 'center'
+          });
+        }
+      } else {
+        // Full-bleed divider slide: big accent block + centered title, no bullets
+        slide.addShape('rect', { x: 0, y: 0, w: 13.33, h: 7.5, fill: { color: theme.accent } });
+        slide.addText(`SECTION ${idx + 1}`, {
+          x: 0.8, y: 2.6, w: 11.7, h: 0.5,
+          fontSize: 13, bold: true, color: theme.bg, align: 'center', charSpacing: 2
+        });
+        slide.addText(s.title || `Slide ${idx + 1}`, {
+          x: 0.8, y: 3.1, w: 11.7, h: 1.3,
+          fontSize: 34, bold: true, color: theme.bg,
+          align: 'center'
+        });
+        if (bullets[0]) {
+          slide.addText(bullets[0], {
+            x: 1.5, y: 4.4, w: 10.3, h: 0.7,
+            fontSize: 15, italic: true, color: theme.bg, align: 'center'
+          });
+        }
+      }
+    } else {
+      // Top Accent Bar for every other layout
+      slide.addShape('rect', { x: 0, y: 0, w: 13.33, h: 0.15, fill: { color: theme.accent } });
+
+      // Slide Title
+      slide.addText(s.title || `Slide ${idx + 1}`, {
+        x: 0.8, y: 0.4, w: 9.0, h: 0.9,
+        fontSize: 24, bold: true, color: theme.titleColor
+      });
+
+      if (layout === 'quote') {
+        // Big centered statement, no bullets, no clutter
+        slide.addShape('line', { x: 2.2, y: 2.5, w: 1.2, h: 0, line: { color: theme.accent, width: 3 } });
+        slide.addText(bullets[0] || s.title || '', {
+          x: 1.2, y: 2.7, w: 10.9, h: 2.8,
+          fontSize: 26, italic: true, bold: true, color: theme.textColor,
+          align: 'left', valign: 'top'
+        });
+      } else if (layout === 'stat_highlight') {
+        // Big number/stat with a one-line caption underneath
+        slide.addText(bullets[0] || '', {
+          x: 0.8, y: 2.2, w: 11.7, h: 2.4,
+          fontSize: 60, bold: true, color: theme.accent, align: 'center'
+        });
+        if (bullets[1]) {
+          slide.addText(bullets[1], {
+            x: 1.8, y: 4.6, w: 9.7, h: 1.0,
+            fontSize: 16, color: theme.textColor, align: 'center'
+          });
+        }
+      } else if (layout === 'two_column' && bullets.length > 1) {
+        // Split bullets evenly across two side-by-side columns
+        const mid = Math.ceil(bullets.length / 2);
+        const col1 = bullets.slice(0, mid).map(bp => ({ text: bp, options: { fontSize: 15, color: theme.textColor, bullet: true, spaceAfter: 10 } }));
+        const col2 = bullets.slice(mid).map(bp => ({ text: bp, options: { fontSize: 15, color: theme.textColor, bullet: true, spaceAfter: 10 } }));
+        slide.addText(col1, { x: 0.8, y: 1.5, w: 5.6, h: 5.0, valign: 'top' });
+        slide.addShape('line', { x: 6.65, y: 1.6, w: 0, h: 4.8, line: { color: theme.accent, width: 1 } });
+        slide.addText(col2, { x: 7.0, y: 1.5, w: 5.5, h: 5.0, valign: 'top' });
+      } else {
+        // Default: standard bullet_list — photo on the right if we have one
+        if (bullets.length > 0) {
+          const formattedBullets = bullets.map(bp => ({
+            text: bp,
+            options: { fontSize: 16, color: theme.textColor, bullet: true, spaceAfter: 10 }
+          }));
+          const textWidth = slideImage ? 6.9 : 11.7;
+          slide.addText(formattedBullets, { x: 0.8, y: 1.5, w: textWidth, h: 5.0, valign: 'top' });
+        }
+        if (slideImage) {
+          slide.addImage({ data: slideImage, x: 8.0, y: 1.6, w: 4.5, h: 4.8, sizing: { type: 'cover', w: 4.5, h: 4.8 } });
+        }
+      }
     }
 
     // Speaker notes
@@ -99,7 +200,16 @@ export async function downloadNativePPTX(
 /**
  * Downloads document data as a Word / Google Docs compatible file (.doc)
  */
-export function downloadWordDocument(data: PDFData) {
+const WORD_THEME_COLORS: Record<string, { primary: string; primaryDark: string; text: string; muted: string; summaryBg: string }> = {
+  indigo:    { primary: '#4338ca', primaryDark: '#3730a3', text: '#334155', muted: '#64748b', summaryBg: '#f1f5f9' },
+  corporate: { primary: '#1e3a5f', primaryDark: '#16293f', text: '#334155', muted: '#64748b', summaryBg: '#f0f4f8' },
+  academic:  { primary: '#6b2121', primaryDark: '#4a1717', text: '#3a3a3a', muted: '#6b6b6b', summaryBg: '#faf7f2' },
+  emerald:   { primary: '#057a55', primaryDark: '#04593f', text: '#334155', muted: '#5a7a6e', summaryBg: '#f0faf6' },
+  mono:      { primary: '#1e1e1e', primaryDark: '#141414', text: '#2a2a2a', muted: '#6e6e6e', summaryBg: '#f5f5f5' },
+};
+
+export function downloadWordDocument(data: PDFData, theme: string = 'indigo') {
+  const c = WORD_THEME_COLORS[theme] || WORD_THEME_COLORS.indigo;
   const htmlContent = `
     <!DOCTYPE html>
     <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
@@ -107,17 +217,17 @@ export function downloadWordDocument(data: PDFData) {
       <meta charset="utf-8">
       <title>${data.title}</title>
       <style>
-        body { font-family: Arial, sans-serif; margin: 40px; color: #1e293b; line-height: 1.6; }
-        h1 { color: #4338ca; font-size: 26px; margin-bottom: 4px; }
-        .subtitle { color: #64748b; font-size: 14px; margin-bottom: 12px; }
-        .meta { color: #4f46e5; font-size: 11px; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 20px; }
-        .summary-box { background-color: #f1f5f9; border-left: 4px solid #4338ca; padding: 16px; margin-bottom: 24px; border-radius: 4px; }
-        .summary-title { font-weight: bold; color: #4338ca; font-size: 12px; text-transform: uppercase; margin-bottom: 6px; }
-        h2 { color: #3730a3; font-size: 18px; margin-top: 24px; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
-        p { font-size: 13px; color: #334155; }
+        body { font-family: Arial, sans-serif; margin: 40px; color: ${c.text}; line-height: 1.6; }
+        h1 { color: ${c.primary}; font-size: 26px; margin-bottom: 4px; }
+        .subtitle { color: ${c.muted}; font-size: 14px; margin-bottom: 12px; }
+        .meta { color: ${c.primary}; font-size: 11px; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-bottom: 20px; }
+        .summary-box { background-color: ${c.summaryBg}; border-left: 4px solid ${c.primary}; padding: 16px; margin-bottom: 24px; border-radius: 4px; }
+        .summary-title { font-weight: bold; color: ${c.primary}; font-size: 12px; text-transform: uppercase; margin-bottom: 6px; }
+        h2 { color: ${c.primaryDark}; font-size: 18px; margin-top: 24px; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
+        p { font-size: 13px; color: ${c.text}; }
         ul { margin-top: 6px; margin-bottom: 16px; }
-        li { font-size: 13px; color: #475569; margin-bottom: 4px; }
-        .footer { margin-top: 40px; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; text-align: center; }
+        li { font-size: 13px; color: ${c.text}; margin-bottom: 4px; }
+        .footer { margin-top: 40px; font-size: 10px; color: ${c.muted}; border-top: 1px solid #e2e8f0; padding-top: 10px; text-align: center; }
       </style>
     </head>
     <body>

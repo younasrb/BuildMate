@@ -111,12 +111,55 @@ export class IntelligentRoutingEngine {
   }
 
   /**
+   * Build a fresh (non-registered, per-request) adapter for each custom
+   * provider the user has added. These aren't stored in `this.adapters`
+   * because the engine is a shared singleton across all users/requests —
+   * each user can have a completely different set of custom providers.
+   */
+  public buildCustomAdapters(req: RouterRequest): BaseAdapter[] {
+    const configs = req.userKeys?.customProviders;
+    if (!configs || configs.length === 0) return [];
+
+    return configs
+      .filter((c) => c && c.id && c.apiKey && c.baseUrl)
+      .map(
+        (c) =>
+          new OpenAICompatibleAdapter(
+            c.id,
+            c.name || 'Custom API',
+            c.baseUrl,
+            [
+              {
+                id: c.modelId || 'gpt-4o-mini',
+                name: c.modelId || 'Custom Model',
+                category: 'Balanced',
+                contextWindow: 'Unknown',
+                costPer1kInputTokenUsd: 0,
+                costPer1kOutputTokenUsd: 0,
+                benchmarkScore: 85,
+              },
+            ],
+            c.apiKey,
+            c.baseUrl
+          )
+      );
+  }
+
+  /**
    * Filter available adapters matching enabled state and user keys
    */
   public getEligibleAdapters(req: RouterRequest): BaseAdapter[] {
     const list: BaseAdapter[] = [];
     for (const [id, adapter] of this.adapters.entries()) {
       if (req.enabledProviders && req.enabledProviders[id] === false) {
+        continue;
+      }
+      if (adapter.isAvailable(req.userKeys)) {
+        list.push(adapter);
+      }
+    }
+    for (const adapter of this.buildCustomAdapters(req)) {
+      if (req.enabledProviders && req.enabledProviders[adapter.id] === false) {
         continue;
       }
       if (adapter.isAvailable(req.userKeys)) {
@@ -350,7 +393,10 @@ export class IntelligentRoutingEngine {
    * Run health test for single provider
    */
   public async testProviderConnection(providerId: ProviderId, userKeys?: UserKeys) {
-    const adapter = this.adapters.get(providerId);
+    let adapter = this.adapters.get(providerId);
+    if (!adapter && userKeys?.customProviders) {
+      adapter = this.buildCustomAdapters({ message: '', userKeys } as RouterRequest).find((a) => a.id === providerId);
+    }
     if (!adapter) {
       return { providerId, success: false, latencyMs: 0, message: 'Provider adapter not found.', testedAt: new Date().toISOString() };
     }
